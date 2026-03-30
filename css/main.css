@@ -1514,6 +1514,12 @@ a.social-link:hover {
 .social-link.email:hover {
 	background-color: #222;
 	}
+.social-link.whatsapp:hover {
+	background-color: #25D366;
+	}
+.social-link.tiktok:hover {
+	background-color: #000000;
+	}
 
 /* PORTFOLIO FILTERS */
 .filters {

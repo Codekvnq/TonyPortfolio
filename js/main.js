@@ -1237,22 +1237,24 @@
     // only jquery get() returns remote page's <head> content
     jQuery.get(url, function (data) {
 
+      var $parsedData = $("<div>").append($.parseHTML(data));
+
       // clear container content
       one_page_content.children(".content-wrap").empty();
 
       // elementor styles fix
       one_page_content
         .children(".content-wrap")
-        .append($(data).filter("#elementor-frontend-inline-css")) // elementor inline styles
-        .append($(data).filter("link[id^='elementor-post-']")) // elementor external styles
-        .append($(data).filter("link[id='elementor-frontend-css']")) // elemementor common styles
-        .append($(data).filter("link[id='elementor-frontend-legacy-css']")) // elemementor legacy styles
-        .append($(data).filter("link[href*='font-awesome']")); // font-awesome elementor styles
+        .append($parsedData.find("#elementor-frontend-inline-css")) // elementor inline styles
+        .append($parsedData.find("link[id^='elementor-post-']")) // elementor external styles
+        .append($parsedData.find("link[id='elementor-frontend-css']")) // elemementor common styles
+        .append($parsedData.find("link[id='elementor-frontend-legacy-css']")) // elemementor legacy styles
+        .append($parsedData.find("link[href*='font-awesome']")); // font-awesome elementor styles
 
       // place page content
       one_page_content
         .children(".content-wrap")
-        .append($(data).find(".page-single > .hentry"));
+        .append($parsedData.find(".page-single > .hentry"));
 
       // wait for images to be loaded
       one_page_content.imagesLoaded(function () {
@@ -1273,6 +1275,9 @@
 
         }
       });
+    }).fail(function() {
+      // fallback completely if ajax fails (e.g. Netlify 404 or config change)
+      window.location.href = url;
     });
   }
 
