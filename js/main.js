@@ -54,7 +54,7 @@
 
       // add hash to links
       $(".home-menu a").each(function (index, element) {
-        if($(this).hasClass('no-ajax')) return;
+        if ($(this).hasClass('no-ajax')) return;
         var menu_link = $(this);
         var file_url = menu_link.attr("href");
         var slug = menu_link.data("slug");
@@ -97,7 +97,7 @@
 
         var detailUrl = giveDetailUrl();
         if (detailUrl !== -1) {
-		  //console.log(detailUrl);
+          //console.log(detailUrl);
           showProjectDetails(detailUrl);
         } else {
           // if url contains portfolio keyword
@@ -600,14 +600,14 @@
       var detailUrl = giveDetailUrl();
 
       if (url.indexOf(baseUrl) !== -1) {
-		//console.log('full-url');
+        //console.log('full-url');
         // full url
         var total = url.length;
         detailUrl = url.slice(baseUrl.length + 1, total);
-		//console.log(detailUrl);
+        //console.log(detailUrl);
         $.address.path("/" + detailUrl);
       } else {
-		//console.log('relative-url');
+        //console.log('relative-url');
         // relative url
         detailUrl = url;
         $.address.path(portfolioKeyword + "/" + detailUrl);
@@ -1000,25 +1000,66 @@
     var contactForm = $("#contact-form");
     if (contactForm.length) {
       var $alert = $(".site-alert");
-      if(!$alert.length) {
+      if (!$alert.length) {
         contactForm.append('<div class="site-alert animated"></div>');
-        }
+      }
       $alert = $(".site-alert");
       var $submit = contactForm.find(".submit");
 
-      contactForm.on("submit", function () {
+      // Load EmailJS SDK lazily
+      if (typeof emailjs === 'undefined') {
+        $.getScript("https://cdn.jsdelivr.net/npm/@emailjs/browser@3/dist/email.min.js", function () {
+          emailjs.init("yx0k9fr2X0b2gy9_y");
+        });
+      }
+
+      contactForm.on("submit", function (e) {
+        e.preventDefault();
+
         if (contactForm.valid()) {
+          if (typeof emailjs === 'undefined') {
+            alert("Email service is still loading, please wait a moment and try again.");
+            return false;
+          }
+
           NProgress.start();
           $submit.addClass("active loading");
-          var formValues = contactForm.serialize();
 
-          $.post(contactForm.attr("action"), formValues, function (data) {
-            if (data === "success") {
-              contactForm.clearForm();
-            } else {
-              $alert.addClass("error");
-            }
+          var fullName = contactForm.find('input[name="name"]').val() || "";
+          var nameParts = fullName.trim().split(" ");
+          var firstName = nameParts[0] || "";
+          var lastName = nameParts.slice(1).join(" ") || "";
+          var now = new Date();
+
+          var formParams = {
+            first_name: firstName,
+            last_name: lastName,
+            email: contactForm.find('input[name="email"]').val(),
+            message: contactForm.find('textarea[name="message"]').val(),
+            subject: contactForm.find('input[name="subject"]').val() || "Contact Form Inquiry",
+            date: now.toLocaleDateString(),
+            time: now.toLocaleTimeString()
+          };
+
+          emailjs.send(
+            "service_31r3fdp",
+            "template_uizx9x2",
+            formParams,
+            "yx0k9fr2X0b2gy9_y"
+          ).then(function (response) {
+            contactForm.clearForm();
+            $alert.removeClass("error");
             NProgress.done();
+            $submit.removeClass("active loading");
+            $alert.show();
+            setTimeout(function () {
+              $alert.hide();
+            }, 6000);
+          }, function (error) {
+            console.error("EmailJS Error:", error);
+            $alert.addClass("error");
+            NProgress.done();
+            $submit.removeClass("active loading");
             $alert.show();
             setTimeout(function () {
               $alert.hide();
@@ -1056,12 +1097,12 @@
 
     var p = $(".p-overlay:not(.active)").first();
     pActive = $(".p-overlay.active");
-	
-	//console.log("ajax-url:" + url);
-	
-	// if wp: then portfolio posts urls should be like: portfolio/post-name
-	url = $('body').hasClass('page-template-page_template-home-php') ? portfolioKeyword + '/' + url : url;
-	
+
+    //console.log("ajax-url:" + url);
+
+    // if wp: then portfolio posts urls should be like: portfolio/post-name
+    url = $('body').hasClass('page-template-page_template-home-php') ? portfolioKeyword + '/' + url : url;
+
     // ajax : fill data
     p.empty().load(url + " .portfolio-single", function () {
       NProgress.set(0.5);
@@ -1075,8 +1116,8 @@
         if (pActive.length) {
           hideProjectDetails();
         }
-		
-		
+
+
         // fix for ajax fetched images height is zero on safari issue
         // https://stackoverflow.com/questions/45487105/ajax-loaded-images-in-safari-not-respecting-srcset
         if (navigator.userAgent.indexOf('Safari') != -1 && navigator.userAgent.indexOf('Chrome') == -1) {
@@ -1084,7 +1125,7 @@
             img.outerHTML = img.outerHTML;
           });
         }
-		
+
         $("html").addClass("p-overlay-on");
 
         // setup plugins
@@ -1275,7 +1316,7 @@
 
         }
       });
-    }).fail(function() {
+    }).fail(function () {
       // fallback completely if ajax fails (e.g. Netlify 404 or config change)
       window.location.href = url;
     });
@@ -1301,14 +1342,13 @@
 
 
     // fix for : ios scroll issue, re-set overflow to trigger scrolling
-    if(/iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream)
-    {
-      one_page_content.css( 'overflow-y', 'hidden');
-      setTimeout(function(){ 
-        one_page_content.css( 'overflow-y', 'scroll');
-        }, 600);
+    if (/iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream) {
+      one_page_content.css('overflow-y', 'hidden');
+      setTimeout(function () {
+        one_page_content.css('overflow-y', 'scroll');
+      }, 600);
     }
-      
+
 
   }
 
