@@ -1009,7 +1009,7 @@
       // Load EmailJS SDK lazily
       if (typeof emailjs === 'undefined') {
         $.getScript("https://cdn.jsdelivr.net/npm/@emailjs/browser@3/dist/email.min.js", function () {
-          emailjs.init("yx0k9fr2X0b2gy9_y");
+          emailjs.init("XVnqV0aOm2ewt681z");
         });
       }
 
@@ -1026,26 +1026,18 @@
           $submit.addClass("active loading");
 
           var fullName = contactForm.find('input[name="name"]').val() || "";
-          var nameParts = fullName.trim().split(" ");
-          var firstName = nameParts[0] || "";
-          var lastName = nameParts.slice(1).join(" ") || "";
-          var now = new Date();
 
           var formParams = {
-            first_name: firstName,
-            last_name: lastName,
-            email: contactForm.find('input[name="email"]').val(),
-            message: contactForm.find('textarea[name="message"]').val(),
-            subject: contactForm.find('input[name="subject"]').val() || "Contact Form Inquiry",
-            date: now.toLocaleDateString(),
-            time: now.toLocaleTimeString()
+            from_name: fullName,
+            from_email: contactForm.find('input[name="email"]').val(),
+            message: contactForm.find('textarea[name="message"]').val()
           };
 
           emailjs.send(
-            "service_31r3fdp",
-            "template_uizx9x2",
+            "service_y1bx44r",
+            "template_dld5mw6",
             formParams,
-            "yx0k9fr2X0b2gy9_y"
+            "XVnqV0aOm2ewt681z"
           ).then(function (response) {
             contactForm.clearForm();
             $alert.removeClass("error");
