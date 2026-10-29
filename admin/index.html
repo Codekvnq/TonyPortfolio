@@ -88,6 +88,24 @@
         login.classList.add('is-hidden');
         dashboard.classList.remove('is-hidden');
       });
+      const labels = { dashboard: 'Dashboard', profile: 'Profile & hero', portfolio: 'Portfolio', resume: 'Resume', contact: 'Contact details', social: 'Social links' };
+      const sections = document.querySelectorAll('.section-view');
+      const breadcrumb = document.getElementById('breadcrumb');
+      function openSection(name) {
+        document.querySelectorAll('.nav-item').forEach((item) => item.classList.toggle('active', item.dataset.section === name));
+        sections.forEach((section) => section.classList.toggle('active', section.id === name + '-section'));
+        breadcrumb.textContent = labels[name] || 'Dashboard';
+        document.getElementById('sidebar').classList.remove('open');
+        window.scrollTo(0, 0);
+      }
+      document.querySelectorAll('.nav-item').forEach((item) => item.addEventListener('click', () => openSection(item.dataset.section)));
+      document.querySelectorAll('[data-section-target]').forEach((item) => item.addEventListener('click', () => openSection(item.dataset.sectionTarget)));
+      document.addEventListener('click', (event) => {
+        const item = event.target.closest('.nav-item, [data-section-target]');
+        if (!item) return;
+        event.preventDefault();
+        openSection(item.dataset.section || item.dataset.sectionTarget);
+      }, true);
     });
   </script>
 </body>
