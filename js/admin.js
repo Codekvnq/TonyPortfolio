@@ -58,7 +58,31 @@ document.addEventListener('DOMContentLoaded', function () {
     document.getElementById('loginUsername').focus();
   });
   document.querySelectorAll('.save-button').forEach((button) => button.addEventListener('click', () => showToast('Changes saved in prototype mode.')));
-  document.getElementById('addProjectButton').addEventListener('click', () => showToast('Project editor coming next in the connected version.'));
+  const projectModal = document.getElementById('projectModal');
+  const projectForm = document.getElementById('projectForm');
+  const portfolioList = document.getElementById('portfolioList');
+  const closeProjectModal = () => { projectModal.classList.remove('open'); projectModal.setAttribute('aria-hidden', 'true'); };
+  document.getElementById('addProjectButton').addEventListener('click', () => { projectModal.classList.add('open'); projectModal.setAttribute('aria-hidden', 'false'); document.getElementById('projectTitle').focus(); });
+  document.getElementById('closeProjectModal').addEventListener('click', closeProjectModal);
+  document.getElementById('cancelProject').addEventListener('click', closeProjectModal);
+  projectModal.addEventListener('click', (event) => { if (event.target === projectModal) closeProjectModal(); });
+  projectForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const title = document.getElementById('projectTitle').value.trim();
+    const category = document.getElementById('projectCategory').value;
+    const status = document.getElementById('projectStatus').value;
+    const image = document.getElementById('projectImage').value.trim();
+    const item = document.createElement('div');
+    item.className = 'portfolio-item';
+    item.innerHTML = `<img src="../${image.replace(/^\\//, '')}" alt="${title} project thumbnail"><div><strong>${title}</strong><small>Added just now</small></div><span>${category}</span><span class="toggle-row"><button class="switch ${status === 'published' ? 'on' : ''}" aria-label="Toggle project visibility"></button> ${status === 'published' ? 'Published' : 'Draft'}</span><button class="more-button" aria-label="More options">•••</button>`;
+    portfolioList.appendChild(item);
+    const projectCount = document.getElementById('projectCount');
+    if (projectCount) projectCount.textContent = String(Number(projectCount.textContent) + 1);
+    item.querySelector('.switch').addEventListener('click', (event) => { event.currentTarget.classList.toggle('on'); showToast(event.currentTarget.classList.contains('on') ? 'Project marked as visible.' : 'Project hidden from portfolio.'); });
+    projectForm.reset();
+    closeProjectModal();
+    showToast('Project added in prototype mode.');
+  });
   document.querySelectorAll('.switch').forEach((button) => button.addEventListener('click', () => {
     button.classList.toggle('on');
     showToast(button.classList.contains('on') ? 'Item marked as visible.' : 'Item hidden from the portfolio.');
