@@ -1,0 +1,25 @@
+# Base44 sandbox environment for this repository.
+# The project is a fully static site (HTML/CSS/jQuery + a prototype admin page):
+# there is no build step and no backend, so nginx serves the working tree
+# directly. Edits appear on refresh without a rebuild.
+services:
+  web:
+    image: nginx:1.27-alpine
+    ports:
+      - "3000:80"
+    volumes:
+      # Serve the cloned source straight from the bind mount (never a baked image).
+      - .:/usr/share/nginx/html:ro
+      # Dev-only main config: see nginx.base44.conf for why workers run as root.
+      - ./nginx.base44.conf:/etc/nginx/nginx.conf:ro
+    restart: on-failure
+    labels:
+      base44.project: "Portfolio"
+      base44.kind: "web"
+      base44.port: "3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1/index.html || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
