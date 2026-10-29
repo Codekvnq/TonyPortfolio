@@ -1,4 +1,4 @@
-document.addEventListener('DOMContentLoaded', function () {
+(function initializeAdmin() {
   const loginScreen = document.getElementById('loginScreen');
   const adminShell = document.querySelector('.admin-shell');
   const loginForm = document.getElementById('loginForm');
@@ -90,4 +90,4 @@ document.addEventListener('DOMContentLoaded', function () {
   document.querySelectorAll('[data-demo-form] input, [data-demo-form] textarea').forEach((field) => field.addEventListener('input', () => {
     field.closest('.section-view')?.querySelector('.mini-hero strong')?.replaceChildren(document.querySelector('[value="Anthony Ampaabeng"]')?.value || 'Anthony Ampaabeng');
   }));
-});
+})();
