@@ -8,7 +8,22 @@
   <link rel="stylesheet" href="../css/admin.css">
 </head>
 <body>
-  <div class="admin-shell">
+  <section class="login-screen" id="loginScreen">
+    <div class="login-card">
+      <div class="login-brand"><span class="brand-mark">A</span><span>ANTHONY<span class="brand-muted"> / ADMIN</span></span></div>
+      <p class="login-kicker">Private workspace</p>
+      <h1>Welcome back</h1>
+      <p class="login-copy">Sign in to manage the content on your portfolio.</p>
+      <form id="loginForm" class="login-form">
+        <label>Username<input id="loginUsername" autocomplete="username" required></label>
+        <label>Password<input id="loginPassword" type="password" autocomplete="current-password" required></label>
+        <p class="login-error" id="loginError" role="alert"></p>
+        <button class="login-button" type="submit">Sign in to dashboard <span>→</span></button>
+      </form>
+      <p class="login-note">Owner access only · Portfolio admin</p>
+    </div>
+  </section>
+  <div class="admin-shell is-hidden">
     <aside class="sidebar" id="sidebar">
       <div class="brand"><span class="brand-mark">A</span><span>ANTHONY<span class="brand-muted"> / ADMIN</span></span></div>
       <div class="sidebar-label">Workspace</div>

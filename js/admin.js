@@ -1,4 +1,30 @@
 document.addEventListener('DOMContentLoaded', function () {
+  const loginScreen = document.getElementById('loginScreen');
+  const adminShell = document.querySelector('.admin-shell');
+  const loginForm = document.getElementById('loginForm');
+  const loginError = document.getElementById('loginError');
+  const ADMIN_USERNAME = 'admin';
+  const ADMIN_PASSWORD = 'admin123!';
+
+  function showDashboard() {
+    loginScreen.classList.add('is-hidden');
+    adminShell.classList.remove('is-hidden');
+  }
+
+  if (sessionStorage.getItem('portfolioAdminAuthenticated') === 'true') showDashboard();
+  loginForm.addEventListener('submit', function (event) {
+    event.preventDefault();
+    const username = document.getElementById('loginUsername').value.trim();
+    const password = document.getElementById('loginPassword').value;
+    if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
+      sessionStorage.setItem('portfolioAdminAuthenticated', 'true');
+      loginError.textContent = '';
+      showDashboard();
+      return;
+    }
+    loginError.textContent = 'Incorrect username or password.';
+  });
+
   const navItems = document.querySelectorAll('.nav-item');
   const sections = document.querySelectorAll('.section-view');
   const breadcrumb = document.getElementById('breadcrumb');
@@ -24,7 +50,13 @@ document.addEventListener('DOMContentLoaded', function () {
   navItems.forEach((item) => item.addEventListener('click', () => openSection(item.dataset.section)));
   document.querySelectorAll('[data-section-target]').forEach((button) => button.addEventListener('click', () => openSection(button.dataset.sectionTarget)));
   document.getElementById('menuButton').addEventListener('click', () => sidebar.classList.toggle('open'));
-  document.getElementById('logoutButton').addEventListener('click', () => showToast('Prototype sign out — connect authentication before launch.'));
+  document.getElementById('logoutButton').addEventListener('click', () => {
+    sessionStorage.removeItem('portfolioAdminAuthenticated');
+    adminShell.classList.add('is-hidden');
+    loginScreen.classList.remove('is-hidden');
+    loginForm.reset();
+    document.getElementById('loginUsername').focus();
+  });
   document.querySelectorAll('.save-button').forEach((button) => button.addEventListener('click', () => showToast('Changes saved in prototype mode.')));
   document.getElementById('addProjectButton').addEventListener('click', () => showToast('Project editor coming next in the connected version.'));
   document.querySelectorAll('.switch').forEach((button) => button.addEventListener('click', () => {
