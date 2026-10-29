@@ -126,16 +126,41 @@
   $('#menuButton').addEventListener('click', function () { $('#sidebar').classList.toggle('open'); });
 
   /* ---------------- Dashboard ---------------- */
+  function activeSocials() {
+    return Object.keys(state.social || {}).filter(function (key) {
+      return state.social[key].visible !== false && state.social[key].url;
+    });
+  }
+
+  function renderChecklist(publishedCount, socialCount) {
+    var checks = [
+      { done: !!(state.profile.name && state.profile.title), label: 'Add your name and professional title' },
+      { done: !!state.profile.intro, label: 'Write your introduction' },
+      { done: publishedCount >= 3, label: 'Publish at least three projects' },
+      { done: socialCount > 0, label: 'Connect a social profile' },
+      { done: (state.resume.jobs || []).length > 0, label: 'Add a work history entry' },
+      { done: !!(state.contact.email && state.contact.phone), label: 'Add your contact details' }
+    ];
+    var doneCount = checks.filter(function (check) { return check.done; }).length;
+    var percent = Math.round((doneCount / checks.length) * 100);
+    $('#completionValue').textContent = percent + '%';
+    $('#completionBar').style.width = percent + '%';
+    $('#contentChecklist').innerHTML = checks.map(function (check) {
+      return '<li class="' + (check.done ? 'done' : '') + '"><span>' + (check.done ? '✓' : '') + '</span>' + check.label + '</li>';
+    }).join('');
+  }
+
   function renderDashboard() {
     var projects = state.projects;
     var published = projects.filter(function (p) { return p.status === 'published'; });
-    var socials = Object.keys(state.social || {}).filter(function (key) { return state.social[key].visible !== false && state.social[key].url; });
+    var socials = activeSocials();
 
     $('#statProjects').textContent = projects.length;
     $('#statProjectsMeta').textContent = projects.length === 1 ? '1 item on the site' : projects.length + ' items on the site';
     $('#statPublished').textContent = published.length;
     $('#statDrafts').textContent = projects.length - published.length;
     $('#statSocial').textContent = socials.length;
+    renderChecklist(published.length, socials.length);
 
     var recent = projects.slice().reverse().slice(0, 5);
     $('#recentProjects').innerHTML = recent.length ? recent.map(function (project) {
@@ -255,11 +280,26 @@
   });
 
   /* ---------------- Profile ---------------- */
+  function renderMiniHero() {
+    var name = $('#profileName').value.trim();
+    var parts = name.split(/\s+/).filter(Boolean);
+    $('#miniHeroLabel').textContent = $('#profileTitle').value.trim() || 'Your role';
+    $('#miniHeroName').innerHTML = parts.length
+      ? esc(parts.shift()) + (parts.length ? '<br>' + esc(parts.join(' ')) : '')
+      : 'Your name';
+    $('#miniHeroIntro').textContent = $('#profileIntro').value.trim() || 'Your introduction appears here.';
+  }
+
   function renderProfile() {
     $('#profileName').value = state.profile.name || '';
     $('#profileTitle').value = state.profile.title || '';
     $('#profileIntro').value = state.profile.intro || '';
+    renderMiniHero();
   }
+
+  ['profileName', 'profileTitle', 'profileIntro'].forEach(function (id) {
+    $('#' + id).addEventListener('input', renderMiniHero);
+  });
   $('#profileForm').addEventListener('submit', function (event) {
     event.preventDefault();
     state.profile = {
