@@ -11,13 +11,29 @@
     adminShell.classList.remove('is-hidden');
   }
 
-  if (sessionStorage.getItem('portfolioAdminAuthenticated') === 'true') showDashboard();
+  function hasActiveSession() {
+    try {
+      return window.sessionStorage.getItem('portfolioAdminAuthenticated') === 'true';
+    } catch {
+      return false;
+    }
+  }
+
+  function saveSession() {
+    try {
+      window.sessionStorage.setItem('portfolioAdminAuthenticated', 'true');
+    } catch {
+      // The preview can block storage access; the in-memory login still works.
+    }
+  }
+
+  if (hasActiveSession()) showDashboard();
   loginForm.addEventListener('submit', function (event) {
     event.preventDefault();
     const username = document.getElementById('loginUsername').value.trim();
     const password = document.getElementById('loginPassword').value;
     if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
-      sessionStorage.setItem('portfolioAdminAuthenticated', 'true');
+      saveSession();
       loginError.textContent = '';
       showDashboard();
       return;
@@ -51,7 +67,11 @@
   document.querySelectorAll('[data-section-target]').forEach((button) => button.addEventListener('click', () => openSection(button.dataset.sectionTarget)));
   document.getElementById('menuButton').addEventListener('click', () => sidebar.classList.toggle('open'));
   document.getElementById('logoutButton').addEventListener('click', () => {
-    sessionStorage.removeItem('portfolioAdminAuthenticated');
+    try {
+      window.sessionStorage.removeItem('portfolioAdminAuthenticated');
+    } catch {
+      // Storage may be unavailable in an embedded preview.
+    }
     adminShell.classList.add('is-hidden');
     loginScreen.classList.remove('is-hidden');
     loginForm.reset();

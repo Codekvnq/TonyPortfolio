@@ -72,5 +72,23 @@
   </div>
   <div class="toast" id="toast" role="status">Changes saved in prototype mode.</div>
   <script src="../js/admin.js"></script>
+  <script>
+    window.addEventListener('load', function () {
+      const form = document.getElementById('loginForm');
+      const login = document.getElementById('loginScreen');
+      const dashboard = document.querySelector('.admin-shell');
+      const error = document.getElementById('loginError');
+      if (!form || !login || !dashboard) return;
+      form.addEventListener('submit', function (event) {
+        event.preventDefault();
+        const valid = document.getElementById('loginUsername').value.trim() === 'admin' && document.getElementById('loginPassword').value === 'admin123!';
+        if (!valid) { error.textContent = 'Incorrect username or password.'; return; }
+        try { window.sessionStorage.setItem('portfolioAdminAuthenticated', 'true'); } catch {}
+        error.textContent = '';
+        login.classList.add('is-hidden');
+        dashboard.classList.remove('is-hidden');
+      });
+    });
+  </script>
 </body>
 </html>
