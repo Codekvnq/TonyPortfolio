@@ -102,10 +102,25 @@
       document.querySelectorAll('[data-section-target]').forEach((item) => item.addEventListener('click', () => openSection(item.dataset.sectionTarget)));
       document.addEventListener('click', (event) => {
         const item = event.target.closest('.nav-item, [data-section-target]');
-        if (!item) return;
-        event.preventDefault();
-        openSection(item.dataset.section || item.dataset.sectionTarget);
+        if (item) {
+          event.preventDefault();
+          openSection(item.dataset.section || item.dataset.sectionTarget);
+          return;
+        }
+        const saveButton = event.target.closest('.save-button');
+        if (saveButton) {
+          event.preventDefault();
+          document.getElementById('toast').classList.add('show');
+          window.setTimeout(() => document.getElementById('toast').classList.remove('show'), 2200);
+        }
       }, true);
+      const modal = document.getElementById('projectModal');
+      const openProject = () => { modal.classList.add('open'); modal.setAttribute('aria-hidden', 'false'); document.getElementById('projectTitle').focus(); };
+      const closeProject = () => { modal.classList.remove('open'); modal.setAttribute('aria-hidden', 'true'); };
+      document.getElementById('addProjectButton').addEventListener('click', openProject);
+      document.getElementById('closeProjectModal').addEventListener('click', closeProject);
+      document.getElementById('cancelProject').addEventListener('click', closeProject);
+      modal.addEventListener('click', (event) => { if (event.target === modal) closeProject(); });
     });
   </script>
 </body>
