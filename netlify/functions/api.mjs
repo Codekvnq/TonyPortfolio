@@ -18,6 +18,21 @@ import {
   verifyPassword,
   verifySession,
 } from "../lib/auth.mjs";
+import {
+  MAX_CONTENT_BYTES,
+  listRevisions,
+  readContent,
+  readRevision,
+  restoreRevision,
+  saveContent,
+} from "../lib/content-store.mjs";
+import {
+  MAX_FULL_BYTES,
+  MAX_THUMB_BYTES,
+  deleteMedia,
+  readMediaIndex,
+  saveMedia,
+} from "../lib/media-store.mjs";
 import { getPortfolioStore, readJson, readText } from "../lib/store.mjs";
 
 const MAX_BODY_BYTES = 16 * 1024;
@@ -39,9 +54,9 @@ function json(value, status = 200, headers = {}) {
   });
 }
 
-async function readBody(req) {
+async function readBody(req, maxBytes = MAX_BODY_BYTES) {
   const length = Number(req.headers.get("content-length") || "0");
-  if (Number.isFinite(length) && length > MAX_BODY_BYTES) {
+  if (Number.isFinite(length) && length > maxBytes) {
     return { error: "Request is too large.", status: 413 };
   }
   let text;
@@ -50,7 +65,7 @@ async function readBody(req) {
   } catch {
     return { error: "Could not read the request.", status: 400 };
   }
-  if (Buffer.byteLength(text, "utf8") > MAX_BODY_BYTES) {
+  if (Buffer.byteLength(text, "utf8") > maxBytes) {
     return { error: "Request is too large.", status: 413 };
   }
   if (!text) return { value: {} };
@@ -59,6 +74,15 @@ async function readBody(req) {
   } catch {
     return { error: "Invalid JSON.", status: 400 };
   }
+}
+
+function isFile(value) {
+  return (
+    value &&
+    typeof value === "object" &&
+    typeof value.arrayBuffer === "function" &&
+    typeof value.size === "number"
+  );
 }
 
 export function createApiHandler({
@@ -129,6 +153,180 @@ export function createApiHandler({
 
   function secureFor(req) {
     return secureCookie === undefined ? isSecureRequest(req) : secureCookie;
+  }
+
+  async function requireSession(req, db) {
+    const session = await readSession(req, db);
+    return session.authenticated ? session : null;
+  }
+
+  async function handleContentGet(req, db) {
+    const entry = await readContent(db);
+    const fresh = new URL(req.url).searchParams.has("fresh");
+    const headers = fresh
+      ? { "cache-control": "no-store" }
+      : {
+          "cache-control": "public, max-age=0, must-revalidate",
+          "netlify-cdn-cache-control":
+            "public, max-age=60, stale-while-revalidate=300, durable",
+        };
+    if (entry?.etag) headers.etag = entry.etag;
+
+    if (entry?.etag && req.headers.get("if-none-match") === entry.etag) {
+      return new Response(null, { status: 304, headers });
+    }
+    if (!entry) {
+      return json({ content: null, version: 0, updatedAt: null }, 200, headers);
+    }
+    return json(
+      {
+        content: entry.value.content,
+        version: entry.value.version,
+        updatedAt: entry.value.updatedAt,
+      },
+      200,
+      headers,
+    );
+  }
+
+  async function handleContentPut(req, db) {
+    const session = await requireSession(req, db);
+    if (!session) return json({ error: "Sign in to continue." }, 401);
+
+    const body = await readBody(req, MAX_CONTENT_BYTES + 16 * 1024);
+    if (body.error) return json({ error: body.error }, body.status);
+
+    const result = await saveContent(db, {
+      content: body.value.content,
+      baseVersion: body.value.baseVersion,
+      now: now(),
+    });
+    if (result.error) return json({ error: result.error }, result.status);
+    if (result.conflict) {
+      return json(
+        {
+          error: "Content changed elsewhere. Reload before saving.",
+          currentVersion: result.currentVersion,
+        },
+        409,
+      );
+    }
+    return json({
+      ok: true,
+      version: result.value.version,
+      updatedAt: result.value.updatedAt,
+    });
+  }
+
+  async function handleRevisionsGet(req, db) {
+    const session = await requireSession(req, db);
+    if (!session) return json({ error: "Sign in to continue." }, 401);
+    return json({ items: await listRevisions(db) });
+  }
+
+  async function handleRevisionGet(req, db, id) {
+    const session = await requireSession(req, db);
+    if (!session) return json({ error: "Sign in to continue." }, 401);
+    const revision = await readRevision(db, id);
+    if (!revision) return json({ error: "Revision not found." }, 404);
+    return json(revision);
+  }
+
+  async function handleRevisionRestore(req, db, id) {
+    const session = await requireSession(req, db);
+    if (!session) return json({ error: "Sign in to continue." }, 401);
+
+    const result = await restoreRevision(db, { id, now: now() });
+    if (result.notFound) return json({ error: "Revision not found." }, 404);
+    if (result.error) return json({ error: result.error }, result.status);
+    if (result.conflict) {
+      return json(
+        {
+          error: "Content changed elsewhere. Reload before restoring.",
+          currentVersion: result.currentVersion,
+        },
+        409,
+      );
+    }
+    return json({
+      ok: true,
+      version: result.value.version,
+      updatedAt: result.value.updatedAt,
+    });
+  }
+
+  async function handleMediaGet(req, db) {
+    const session = await requireSession(req, db);
+    if (!session) return json({ error: "Sign in to continue." }, 401);
+    const { items } = await readMediaIndex(db);
+    return json({ items });
+  }
+
+  async function handleMediaPost(req, db) {
+    const session = await requireSession(req, db);
+    if (!session) return json({ error: "Sign in to continue." }, 401);
+
+    const contentType = req.headers.get("content-type") || "";
+    if (!contentType.toLowerCase().includes("multipart/form-data")) {
+      return json({ error: "Expected a multipart image upload." }, 415);
+    }
+
+    let form;
+    try {
+      form = await req.formData();
+    } catch {
+      return json({ error: "Could not read the upload." }, 400);
+    }
+
+    const full = form.get("full");
+    const thumb = form.get("thumb");
+    if (!isFile(full)) {
+      return json({ error: "Choose an image to upload." }, 400);
+    }
+    if (!isFile(thumb)) {
+      return json({ error: "The thumbnail is missing." }, 400);
+    }
+    if (full.size > MAX_FULL_BYTES) {
+      return json({ error: "The image must be 4 MB or smaller." }, 413);
+    }
+    if (thumb.size > MAX_THUMB_BYTES) {
+      return json({ error: "The thumbnail must be 768 KB or smaller." }, 413);
+    }
+
+    const result = await saveMedia(db, {
+      full: await full.arrayBuffer(),
+      thumb: await thumb.arrayBuffer(),
+      filename: form.get("filename") || full.name,
+      alt: form.get("alt"),
+      width: form.get("width"),
+      height: form.get("height"),
+      now: now(),
+    });
+
+    if (result.error) return json({ error: result.error }, result.status);
+    return json(
+      { ok: true, item: result.item, existing: Boolean(result.existing) },
+      result.existing ? 200 : 201,
+    );
+  }
+
+  async function handleMediaDelete(req, db, id) {
+    const session = await requireSession(req, db);
+    if (!session) return json({ error: "Sign in to continue." }, 401);
+
+    const contentEntry = await readContent(db);
+    const result = await deleteMedia(db, {
+      id,
+      content: contentEntry?.value?.content ?? null,
+    });
+    if (result.notFound) return json({ error: "Image not found." }, 404);
+    if (result.referenced) {
+      return json(
+        { error: "This image is still used in the site content." },
+        409,
+      );
+    }
+    return json({ ok: true, item: result.item });
   }
 
   function throttleKey(req) {
@@ -388,6 +586,33 @@ export function createApiHandler({
       }
       if (req.method === "PUT" && path === "/api/account") {
         return await handleAccount(req, db);
+      }
+      if (req.method === "GET" && path === "/api/content") {
+        return await handleContentGet(req, db);
+      }
+      if (req.method === "PUT" && path === "/api/content") {
+        return await handleContentPut(req, db);
+      }
+      if (req.method === "GET" && path === "/api/revisions") {
+        return await handleRevisionsGet(req, db);
+      }
+      const restoreMatch = /^\/api\/revisions\/([^/]+)\/restore$/.exec(path);
+      if (req.method === "POST" && restoreMatch) {
+        return await handleRevisionRestore(req, db, restoreMatch[1]);
+      }
+      const revisionMatch = /^\/api\/revisions\/([^/]+)$/.exec(path);
+      if (req.method === "GET" && revisionMatch) {
+        return await handleRevisionGet(req, db, revisionMatch[1]);
+      }
+      if (req.method === "GET" && path === "/api/media") {
+        return await handleMediaGet(req, db);
+      }
+      if (req.method === "POST" && path === "/api/media") {
+        return await handleMediaPost(req, db);
+      }
+      const mediaMatch = /^\/api\/media\/([^/]+)$/.exec(path);
+      if (req.method === "DELETE" && mediaMatch) {
+        return await handleMediaDelete(req, db, mediaMatch[1]);
       }
       return json({ error: "Not found." }, 404);
     } catch (error) {

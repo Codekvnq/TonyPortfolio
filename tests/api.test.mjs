@@ -1,96 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createApiHandler } from "../netlify/functions/api.mjs";
 import { signSession } from "../netlify/lib/auth.mjs";
-
-function memoryStore() {
-  const values = new Map();
-  const etags = new Map();
-  let sequence = 0;
-
-  function canWrite(key, options = {}) {
-    if (options.onlyIfNew && values.has(key)) return false;
-    if (options.onlyIfMatch && etags.get(key) !== options.onlyIfMatch) return false;
-    return true;
-  }
-
-  return {
-    values,
-    failNextMatch: false,
-    async get(key, options = {}) {
-      if (!values.has(key)) return null;
-      const value = values.get(key);
-      return options.type === "json" ? structuredClone(value) : value;
-    },
-    async getWithMetadata(key, options = {}) {
-      if (!values.has(key)) return null;
-      const value = values.get(key);
-      return {
-        data: options.type === "json" ? structuredClone(value) : value,
-        etag: etags.get(key) ?? null,
-      };
-    },
-    async setJSON(key, value, options = {}) {
-      if (options.onlyIfMatch && this.failNextMatch) {
-        this.failNextMatch = false;
-        return { modified: false };
-      }
-      if (!canWrite(key, options)) return { modified: false };
-      values.set(key, structuredClone(value));
-      const etag = `"etag-${++sequence}"`;
-      etags.set(key, etag);
-      return { modified: true, etag };
-    },
-    async set(key, value, options = {}) {
-      if (!canWrite(key, options)) return { modified: false };
-      values.set(key, value);
-      const etag = `"etag-${++sequence}"`;
-      etags.set(key, etag);
-      return { modified: true, etag };
-    },
-    async delete(key) {
-      values.delete(key);
-      etags.delete(key);
-    },
-  };
-}
-
-function makeHandler(store) {
-  return createApiHandler({
-    store,
-    iterations: 1_000,
-    sleep: async () => {},
-  });
-}
-
-async function call(handler, method, path, { body, cookie, origin } = {}) {
-  const headers = new Headers({
-    "x-forwarded-host": "portfolio.test",
-    "x-forwarded-proto": "https",
-  });
-  if (origin !== undefined) headers.set("origin", origin);
-  if (cookie) headers.set("cookie", `admin_session=${cookie}`);
-  if (body !== undefined) headers.set("content-type", "application/json");
-
-  return handler(
-    new Request(`https://portfolio.test${path}`, {
-      method,
-      headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
-    }),
-  );
-}
-
-function cookieValue(response) {
-  const header = response.headers.get("set-cookie");
-  if (!header) return null;
-  const first = header.split(";")[0];
-  return first.slice(first.indexOf("=") + 1) || null;
-}
-
-async function login(handler, username = "admin", password = "admin123!") {
-  return call(handler, "POST", "/api/login", { body: { username, password } });
-}
+import {
+  call,
+  cookieValue,
+  login,
+  makeHandler,
+  memoryStore,
+} from "./helpers.mjs";
 
 test("default credentials log in and start a session", async () => {
   const handler = makeHandler(memoryStore());

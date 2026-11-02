@@ -12,7 +12,9 @@ site/                     publish directory (all public files)
   css/ js/ images/ ...    existing assets
   *.html, robots.txt
 netlify/functions/        server code (never published as static files)
-  ping.mjs                temporary health check
+  api.mjs                 /api/* routes (auth, content, revisions, media)
+  media.mjs               /media/* image delivery
+netlify/lib/              shared server modules (auth, stores)
 netlify.toml              publish + functions + headers
 package.json              @netlify/blobs, netlify-cli
 docs/                     internal documentation (not deployed)
@@ -45,13 +47,14 @@ Admin URL: `https://<site>.netlify.app/admin/`
 | `GET /api/session` | Current session and default-password warning | done |
 | `POST /api/logout` | Clears the session | done |
 | `PUT /api/account` | Change username/password, invalidate other sessions | done |
-| `GET /api/content` | Public site content (CDN cached ~60s) | next |
-| `PUT /api/content` | Owner-only save with version check | next |
-| `GET /api/revisions` | Recent snapshots | next |
-| `POST /api/revisions/:id/restore` | Restore a snapshot | next |
-| `GET/POST /api/media` | List or upload images | next |
-| `DELETE /api/media/:id` | Delete an unused image | next |
-| `GET /media/:key` | Public image bytes, one-year immutable cache | next |
+| `GET /api/content` | Public site content (CDN cached ~60s, `?fresh` bypasses) | done |
+| `PUT /api/content` | Owner-only save with optimistic version check | done |
+| `GET /api/revisions` | Recent snapshots, newest first | done |
+| `GET /api/revisions/:id` | One snapshot with its content | done |
+| `POST /api/revisions/:id/restore` | Restore a snapshot as a new version | done |
+| `GET/POST /api/media` | List or upload images (multipart `full` + `thumb`) | done |
+| `DELETE /api/media/:id` | Delete an image that content no longer references | done |
+| `GET /media/:key` | Public image bytes, one-year immutable cache | done |
 
 Default credentials are `admin` / `admin123!` until the owner changes them in
 Account. A `mustChange` flag drives the dashboard warning.
@@ -62,7 +65,7 @@ Account. A `mustChange` flag drives the dashboard warning.
 - `revisions/<id>.json` — last 20 saves
 - `auth.json` — username, PBKDF2 hash, salt, credential version
 - `session-secret` — auto-generated signing key
-- `media/<hash>.webp`, `thumbs/<hash>.webp` — uploaded images
+- `media/<hash>.<ext>`, `media/<hash>-thumb.<ext>` — uploaded images
 - `media-index.json` — media library metadata
 
 ## Limits
