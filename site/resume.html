@@ -28,6 +28,7 @@
     <link rel="stylesheet" type="text/css" href="js/jquery.magnific-popup/magnific-popup.css">
     <link rel="stylesheet" type="text/css" href="css/fonts/fontello/css/fontello.css">
     <link rel="stylesheet" type="text/css" href="css/main.css">
+        <link rel="stylesheet" type="text/css" href="css/portfolio-content.css">
     <link rel="stylesheet" type="text/css" href="css/768.css">
 
 
@@ -69,7 +70,7 @@
                 <!-- header-wrap -->
                 <div class="header-wrap layout-full">
 
-                    <img src="images/home/cover.jpg" alt="profile-image">
+                    <img src="images/home/cover.jpeg" alt="profile-image">
 
                     <div class="home-heading">
                         <div class="home-logo">
@@ -206,6 +207,8 @@
                                     <!-- .entry-content -->
                                     <div class="entry-content">
 
+                                        <p class="resume-summary" id="resumeSummary"></p>
+
 
 
 
@@ -217,80 +220,9 @@
                                             <div class="col-sm-6 col-lg-7">
 
 
-                                                <div class="event">
-                                                    <h2>WORK HISTORY</h2>
-                                                    <p>
-                                                        <i class="pw-icon-badge"></i>
-                                                        <!--<img src="images/site/icon-03.png" alt="image"/>-->
-                                                    </p>
-                                                </div>
+                                                <div id="resumeHistory"></div>
 
-                                                <div class="event">
-                                                    <h3>2026 - Present</h3>
-                                                    <h4>Senior Graphic Designer</h4>
-                                                    <h5>Freelance</h5>
-                                                    <p>Working with clients across Ghana and beyond to create
-                                                        compelling brand identities, marketing materials, and
-                                                        digital designs that drive business growth.</p>
-                                                </div>
-
-
-                                                <div class="event">
-                                                    <h3>2024 - 2025</h3>
-                                                    <h4>Graphic Designer</h4>
-                                                    <h5>Hopexchange Medical Center, Kumasi</h5>
-                                                    <p>Spearheaded all visual communications for the center. Designed
-                                                        patient
-                                                        information brochures, health campaign materials, internal
-                                                        documents,
-                                                        and engaging social media content.</p>
-                                                </div>
-
-
-                                                <div class="event">
-                                                    <h3>2024 - 2025</h3>
-                                                    <h4>Design Intern</h4>
-                                                    <h5>KSTS, Kumasi</h5>
-                                                    <p>Assisted the internal communications team by creating digital
-                                                        assets
-                                                        and formatting school documents. Gained practical experience in
-                                                        layout composition and applying brand guidelines.</p>
-                                                </div>
-
-                                                <div class="event">
-                                                    <h2>EDUCATION</h2>
-                                                    <p>
-                                                        <i class="pw-icon-education"></i>
-                                                        <!--<img src="images/site/icon-03.png" alt="image"/>-->
-                                                    </p>
-                                                </div>
-
-                                                <div class="event">
-                                                    <h3>2025</h3>
-                                                    <h4>Information Technology</h4>
-                                                    <h5>AAMUSTED, Kumasi</h5>
-                                                    <p>Built a strong foundation in computing systems, network
-                                                        infrastructure, and software development. Gained hands-on
-                                                        experience in system analysis, database management, and
-                                                        implementing IT solutions to solve real-world technical
-                                                        challenges.</p>
-                                                </div>
-
-
-                                                <div class="event">
-                                                    <h3>2019</h3>
-                                                    <h4>Visual Arts</h4>
-                                                    <h5>Senior High School</h5>
-                                                    <p>Developed foundational skills in drawing, painting,
-                                                        and visual composition that laid the groundwork for
-                                                        a career in graphic design.</p>
-                                                </div>
-
-
-
-                                                <p><a href="pdf/MY PROFESSIONAL CV.pdf" download="Anthony_Ampaabeng_CV.pdf" target="_blank" class="button  primary"><i
-                                                            class="pw-icon-doc-alt"></i>Download
-                                                        CV</a></p>
+                                                <p><a id="resumeCvLink" href="pdf/MY PROFESSIONAL CV.pdf" download="Anthony_Ampaabeng_CV.pdf" target="_blank" class="button  primary"><i class="pw-icon-doc-alt"></i>Download CV</a></p>
 
                                             </div>
                                             <!-- col -->
@@ -311,45 +243,7 @@
                                                 <!-- section-title -->
 
 
-                                                <!-- .skill-unit -->
-                                                <div class="skill-unit">
-                                                    <h4>Adobe Photoshop</h4>
-                                                    <div class="bar" data-percent="95">
-                                                        <div class="progress"></div>
-                                                    </div>
-                                                </div>
-                                                <!-- .skill-unit -->
-
-                                                <!-- .skill-unit -->
-                                                <div class="skill-unit">
-                                                    <h4>Adobe Illustrator</h4>
-                                                    <div class="bar" data-percent="70">
-                                                        <div class="progress"></div>
-                                                    </div>
-                                                </div>
-                                                <!-- .skill-unit -->
-
-                                                <!-- .skill-unit -->
-                                                <div class="skill-unit">
-                                                    <h4>Adobe Premiere Pro</h4>
-                                                    <div class="bar" data-percent="75">
-                                                        <div class="progress"></div>
-                                                    </div>
-                                                </div>
-                                                <!-- .skill-unit -->
-
-                                                <!-- .skill-unit -->
-                                                <div class="skill-unit">
-                                                    <h4>Adobe LightRoom</h4>
-                                                    <div class="bar" data-percent="90">
-                                                        <div class="progress"></div>
-                                                    </div>
-                                                </div>
-                                                <!-- .skill-unit -->
-
-
-
-
+                                                <div id="resumeSkillsPrimary"></div>
 
                                                 <!-- section-title -->
                                                 <div class="section-title center">
@@ -359,43 +253,7 @@
                                                 </div>
                                                 <!-- section-title -->
 
-                                                <!-- .skill-unit -->
-                                                <div class="skill-unit">
-                                                    <h4>Typography</h4>
-                                                    <div class="bar" data-percent="90">
-                                                        <div class="progress"></div>
-                                                    </div>
-                                                </div>
-                                                <!-- .skill-unit -->
-
-                                                <!-- .skill-unit -->
-                                                <div class="skill-unit">
-                                                    <h4>Brand Identity</h4>
-                                                    <div class="bar" data-percent="95">
-                                                        <div class="progress"></div>
-                                                    </div>
-                                                </div>
-                                                <!-- .skill-unit -->
-
-                                                <!-- .skill-unit -->
-                                                <div class="skill-unit">
-                                                    <h4>Print Design</h4>
-                                                    <div class="bar" data-percent="85">
-                                                        <div class="progress"></div>
-                                                    </div>
-                                                </div>
-                                                <!-- .skill-unit -->
-
-                                                <!-- .skill-unit -->
-                                                <div class="skill-unit">
-                                                    <h4>Social Media Design</h4>
-                                                    <div class="bar" data-percent="90">
-                                                        <div class="progress"></div>
-                                                    </div>
-                                                </div>
-                                                <!-- .skill-unit -->
-
-
+                                                <div id="resumeSkillsSecondary"></div>
 
                                                 <!-- section-title -->
                                                 <div class="section-title center">
@@ -570,6 +428,8 @@
     <script src="js/jquery-validate.js"></script>
     <script src="js/resize-sensor.js"></script>
     <script src="js/jquery-sticky-sidebar.js"></script>
+    <script src="js/content-store.js"></script>
+    <script src="js/site-content.js"></script>
     <script src="js/main.js"></script>
 
 
