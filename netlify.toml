@@ -4,6 +4,7 @@
 
 [build.environment]
   NODE_VERSION = "22"
+  NPM_FLAGS = "--omit=dev"
 
 # The admin shell must never be indexed or cached by the browser.
 [[headers]]
