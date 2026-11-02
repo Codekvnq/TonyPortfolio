@@ -39,19 +39,22 @@ Admin URL: `https://<site>.netlify.app/admin/`
 
 ## Planned routes
 
-| Route | Purpose |
-|---|---|
-| `POST /api/login` | Username + password, sets the session cookie |
-| `GET /api/session` | Current session and default-password warning |
-| `POST /api/logout` | Clears the session |
-| `PUT /api/account` | Change username/password, invalidate other sessions |
-| `GET /api/content` | Public site content (CDN cached ~60s) |
-| `PUT /api/content` | Owner-only save with version check |
-| `GET /api/revisions` | Recent snapshots |
-| `POST /api/revisions/:id/restore` | Restore a snapshot |
-| `GET/POST /api/media` | List or upload images |
-| `DELETE /api/media/:id` | Delete an unused image |
-| `GET /media/:key` | Public image bytes, one-year immutable cache |
+| Route | Purpose | Status |
+|---|---|---|
+| `POST /api/login` | Username + password, sets the session cookie | done |
+| `GET /api/session` | Current session and default-password warning | done |
+| `POST /api/logout` | Clears the session | done |
+| `PUT /api/account` | Change username/password, invalidate other sessions | done |
+| `GET /api/content` | Public site content (CDN cached ~60s) | next |
+| `PUT /api/content` | Owner-only save with version check | next |
+| `GET /api/revisions` | Recent snapshots | next |
+| `POST /api/revisions/:id/restore` | Restore a snapshot | next |
+| `GET/POST /api/media` | List or upload images | next |
+| `DELETE /api/media/:id` | Delete an unused image | next |
+| `GET /media/:key` | Public image bytes, one-year immutable cache | next |
+
+Default credentials are `admin` / `admin123!` until the owner changes them in
+Account. A `mustChange` flag drives the dashboard warning.
 
 ## Blobs keys (`portfolio` store)
 

@@ -6,8 +6,12 @@
   "description": "Anthony Ampaabeng portfolio with a Netlify Functions + Blobs admin backend.",
   "scripts": {
     "dev": "netlify dev",
+    "test": "node --test",
     "deploy:preview": "netlify deploy",
     "deploy:prod": "netlify deploy --prod"
+  },
+  "engines": {
+    "node": ">=22"
   },
   "dependencies": {
     "@netlify/blobs": "^11.1.7"
