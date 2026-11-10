@@ -667,9 +667,9 @@
         if (xhr.status >= 400) {
           try {
             var body = JSON.parse(xhr.responseText);
-            reject(new Error(body.error || 'Could not upload the video.'));
+            reject(new Error(body.error || 'Upload failed (status ' + xhr.status + ').'));
           } catch {
-            reject(new Error('Could not upload the video.'));
+            reject(new Error('Upload failed (status ' + xhr.status + ').'));
           }
           return;
         }
