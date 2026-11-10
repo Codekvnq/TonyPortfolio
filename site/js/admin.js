@@ -2076,25 +2076,49 @@
      ------------------------------------------------------------------------ */
 
   function renderAccount() {
+    var editing = Boolean(state.accountEditing);
+    var disabled = editing ? '' : ' disabled';
+
     var html = pageHead('Account', 'The username and password that protect this admin.');
 
     html += '<div class="account-grid"><section class="panel">' +
       '<div class="panel-head"><div><h2 class="panel-title">Sign-in details</h2>' +
-      '<p class="panel-sub">You sign in with one username and one password. Changes apply immediately.</p></div></div>' +
+      '<p class="panel-sub">You sign in with one username and one password.</p></div>' +
+      (editing ? '' :
+        '<div class="panel-actions"><button class="btn btn-primary btn-sm" type="button" data-account-action="edit-account">' +
+        icon('edit') + 'Edit</button></div>') +
+      '</div>' +
       '<form class="panel-form form-stack" id="accountForm" novalidate>' +
       '<div class="field"><label for="accountUsername">Username</label>' +
-      '<input class="input" id="accountUsername" name="username" type="text" value="' + esc(state.username) + '" autocomplete="username" spellcheck="false" required>' +
+      '<input class="input" id="accountUsername" name="username" type="text"' + disabled +
+      ' value="' + esc(state.username || '') + '" autocomplete="username" spellcheck="false" required>' +
       '<p class="field-help">At least 3 characters. Letters, numbers, dots, dashes and underscores.</p></div>' +
       '<div class="field"><label for="accountCurrent">Current password</label>' +
-      '<input class="input" id="accountCurrent" name="currentPassword" type="password" autocomplete="current-password" required>' +
+      '<div class="input-wrap has-toggle">' +
+      '<input class="input" id="accountCurrent" name="currentPassword" type="password"' + disabled +
+      ' autocomplete="current-password" required>' +
+      '<button class="password-toggle" type="button" data-account-action="toggle-current" aria-label="Show password" aria-pressed="false">' +
+      '<span data-icon="eye" aria-hidden="true"></span></button></div>' +
       '<p class="field-help">Required before anything changes.</p></div>' +
       '<div class="field"><label for="accountNew">New password</label>' +
-      '<input class="input" id="accountNew" name="newPassword" type="password" autocomplete="new-password">' +
-      '<p class="field-help">Leave blank to keep the current password. At least 10 characters and not the default.</p></div>' +
+      '<div class="input-wrap has-toggle">' +
+      '<input class="input" id="accountNew" name="newPassword" type="password"' + disabled +
+      ' autocomplete="new-password">' +
+      '<button class="password-toggle" type="button" data-account-action="toggle-new" aria-label="Show password" aria-pressed="false">' +
+      '<span data-icon="eye" aria-hidden="true"></span></button></div>' +
+      '<p class="field-help">Leave blank to keep current. At least 10 characters, not the default.</p></div>' +
       '<div class="field"><label for="accountConfirm">Repeat new password</label>' +
-      '<input class="input" id="accountConfirm" name="confirmPassword" type="password" autocomplete="new-password"></div>' +
+      '<div class="input-wrap has-toggle">' +
+      '<input class="input" id="accountConfirm" name="confirmPassword" type="password"' + disabled +
+      ' autocomplete="new-password">' +
+      '<button class="password-toggle" type="button" data-account-action="toggle-confirm" aria-label="Show password" aria-pressed="false">' +
+      '<span data-icon="eye" aria-hidden="true"></span></button></div></div>' +
       '<p class="form-error" id="accountError" role="alert"></p>' +
-      '<div class="form-actions"><button class="btn btn-primary" type="submit">Save account</button></div>' +
+      (editing ?
+        '<div class="form-actions"><button class="btn btn-secondary btn-sm" type="button" data-account-action="cancel-edit">' +
+        icon('x') + 'Cancel</button>' +
+        '<button class="btn btn-primary btn-sm" type="submit">' + icon('check') + 'Save changes</button></div>' :
+        '') +
       '</form></section>' +
       '<aside class="rail">' +
       '<section class="panel"><div class="panel-head"><div><h2 class="panel-title">Session</h2></div></div>' +
@@ -2114,11 +2138,45 @@
   }
 
   function handleAccountClick(event) {
-    if (event.target.closest('[data-account-action="sign-out"]')) handleSignOut();
+    var action = event.target.closest('[data-account-action]');
+    if (!action) return;
+    var name = action.getAttribute('data-account-action');
+
+    if (name === 'sign-out') {
+      handleSignOut();
+      return;
+    }
+    if (name === 'edit-account') {
+      state.accountEditing = true;
+      renderAccount();
+      return;
+    }
+    if (name === 'cancel-edit') {
+      state.accountEditing = false;
+      renderAccount();
+      return;
+    }
+    if (name === 'save-edit') {
+      var form = document.getElementById('accountForm');
+      if (form) form.requestSubmit();
+      return;
+    }
+    if (name === 'toggle-current' || name === 'toggle-new' || name === 'toggle-confirm') {
+      var field = name === 'toggle-current' ? '#accountCurrent'
+        : name === 'toggle-new' ? '#accountNew' : '#accountConfirm';
+      var input = document.querySelector(field);
+      var button = action;
+      var showing = input.type === 'text';
+      input.type = showing ? 'password' : 'text';
+      button.setAttribute('aria-pressed', String(!showing));
+      button.setAttribute('aria-label', showing ? 'Show password' : 'Hide password');
+      return;
+    }
   }
 
   function submitAccount(event) {
     event.preventDefault();
+    if (!state.accountEditing) return;
     var form = event.currentTarget;
     var username = form.querySelector('#accountUsername').value.trim();
     var current = form.querySelector('#accountCurrent').value;
@@ -2168,6 +2226,7 @@
         error.textContent = result.body.error || 'Could not update your account.';
         return;
       }
+      state.accountEditing = false;
       applySession({ username: result.body.username, mustChange: false });
       toast('Account updated. Use the new details next time you sign in.', 'info');
       renderRoute();
@@ -2175,7 +2234,7 @@
       error.textContent = networkMessage(errorObject);
     }).then(function () {
       button.disabled = false;
-      button.textContent = 'Save account';
+      button.textContent = 'Save changes';
     });
   }
 
