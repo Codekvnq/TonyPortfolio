@@ -188,17 +188,20 @@ svg.icon-sm {
 }
 
 .brand-mark {
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   flex: none;
   display: grid;
   place-items: center;
-  border-radius: 6px;
+  border-radius: 7px;
   background: var(--accent);
   color: #ffffff;
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1;
+}
+
+.brand-mark svg {
+  width: 16px;
+  height: 16px;
+  display: block;
 }
 
 .brand-copy {
@@ -3159,7 +3162,11 @@ select.select-inline {
 .boot-card .brand-mark {
   width: 46px;
   height: 46px;
-  font-size: 19px;
+}
+
+.boot-card .brand-mark svg {
+  width: 22px;
+  height: 22px;
 }
 
 .boot-title {
