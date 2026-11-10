@@ -445,6 +445,7 @@
         state.data = Store.get();
         state.snapshot = JSON.parse(JSON.stringify(state.data));
         renderRoute();
+        toast('Changes saved.');
       });
       return;
     }
@@ -709,6 +710,19 @@
 
   function handleSignOut() {
     closePopovers();
+    confirmAction({
+      title: 'Sign out',
+      subtitle: 'Leave the admin area.',
+      message: 'Sign out of the portfolio admin? You will need to sign in again to make changes.',
+      confirmLabel: 'Sign out',
+      danger: true
+    }).then(function (confirmed) {
+      if (!confirmed) return;
+      doSignOut();
+    });
+  }
+
+  function doSignOut() {
     return apiJson('/api/logout', { method: 'POST' }).catch(function () {
       // The cookie expires on its own even if the request fails.
     }).then(function () {
@@ -1639,7 +1653,12 @@
       '</section></div>';
 
     html += '<div class="editor-rail"><section class="panel preview-panel"><div class="panel-head"><div><h2 class="panel-title">Preview</h2><p class="panel-sub">How the hero reads.</p></div></div>' +
-      '<div class="hero-preview"><span class="preview-label">Hero</span><strong id="profilePreviewName">' + esc(profile.name) + '</strong>' +
+      '<div class="hero-preview">' +
+      '<div class="hero-image-wrap">' +
+      '<img class="hero-image" id="profilePreviewImage" src="' + esc(assetUrl(profile.portrait)) + '" alt=""' + (profile.portrait ? '' : ' style="display:none"') + '>' +
+      '<div class="hero-overlay"></div>' +
+      '</div>' +
+      '<span class="preview-label">Hero</span><strong id="profilePreviewName">' + esc(profile.name) + '</strong>' +
       '<p id="profilePreviewTitle">' + esc(profile.title) + '</p><p id="profilePreviewIntro">' + esc(profile.intro) + '</p><span class="preview-mark">AA</span></div>' +
       '<div class="cv-preview"><div class="cv-sheet"><span class="preview-label">Marquee</span><p id="profilePreviewMarquee" style="margin-top:6px;color:#475467;font-size:11.5px;line-height:1.5">' + esc(profile.marquee) + '</p></div></div>' +
       '</section></div></div></fieldset>';
@@ -1662,6 +1681,11 @@
       var portrait = document.getElementById('portraitImage');
       portrait.src = assetUrl(nextProfile.portrait);
       portrait.hidden = !nextProfile.portrait;
+      var image = document.getElementById('profilePreviewImage');
+      if (image) {
+        image.src = assetUrl(nextProfile.portrait);
+        image.style.display = nextProfile.portrait ? '' : 'none';
+      }
       var url = document.getElementById('portraitUrl');
       if (url && document.activeElement !== url) url.value = nextProfile.portrait;
     };
@@ -1850,7 +1874,7 @@
         social.platform = value;
         social.label = socialLabel(value);
       }
-    });
+    }, { toast: 'Platform updated.' });
     var list = document.getElementById('socialList');
     if (list) {
       list.innerHTML = socialRowsHtml(Store.get());
@@ -1876,10 +1900,12 @@
     var toggle = event.target.closest('[data-social-toggle]');
     if (toggle) {
       var toggleId = toggle.closest('[data-social-id]').getAttribute('data-social-id');
+      var social = state.data.socials.find(function (item) { return item.id === toggleId; });
+      var willShow = !social || !social.visible;
       saveData(function (data) {
-        var social = data.socials.find(function (item) { return item.id === toggleId; });
-        if (social) social.visible = !social.visible;
-      });
+        var s = data.socials.find(function (item) { return item.id === toggleId; });
+        if (s) s.visible = willShow;
+      }, { toast: willShow ? 'Link shown.' : 'Link hidden.' });
       var next = Store.get().socials.find(function (item) { return item.id === toggleId; });
       toggle.setAttribute('aria-checked', String(Boolean(next && next.visible)));
       if (state.refreshPreview) state.refreshPreview(Store.get());
