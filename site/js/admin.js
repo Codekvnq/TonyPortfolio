@@ -653,7 +653,7 @@
 
     return new Promise(function (resolve, reject) {
       // Step 1: Get a signed upload URL from Netlify Functions
-      apiJson('/api/video-sign', { cache: 'no-store' }).then(function (result) {
+      apiJson('/api/video-sign', { method: 'POST', cache: 'no-store' }).then(function (result) {
         if (!result.response.ok) {
           try {
             var body = JSON.parse(result.responseText);
