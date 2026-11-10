@@ -645,23 +645,48 @@
     });
   }
 
-  function uploadVideo(file) {
+  function uploadVideo(file, onProgress) {
     if (!file) return Promise.reject(new Error('Choose a video file to upload.'));
     if (file.size > 500 * 1024 * 1024) {
       return Promise.reject(new Error('Choose a video smaller than 500 MB.'));
     }
-    var form = new FormData();
-    form.append('file', file, file.name || 'video.mp4');
-    return apiJson('/api/video', { method: 'POST', body: form }, 120000).then(function (result) {
-      if (result.response.status === 401) {
-        var expired = new Error('Your session expired. Sign in again.');
-        expired.unauthorized = true;
-        throw expired;
-      }
-      if (!result.response.ok) {
-        throw new Error(result.body.error || 'Could not upload the video.');
-      }
-      return result.body.item;
+    return new Promise(function (resolve, reject) {
+      var xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/video', true);
+      xhr.withCredentials = true;
+      xhr.upload.onprogress = function (event) {
+        if (event.lengthComputable && onProgress) {
+          var percent = Math.round((event.loaded / event.total) * 100);
+          onProgress(percent);
+        }
+      };
+      xhr.onload = function () {
+        if (xhr.status === 401) {
+          reject(new Error('Your session expired. Sign in again.'));
+          return;
+        }
+        if (xhr.status >= 400) {
+          try {
+            var body = JSON.parse(xhr.responseText);
+            reject(new Error(body.error || 'Could not upload the video.'));
+          } catch {
+            reject(new Error('Could not upload the video.'));
+          }
+          return;
+        }
+        try {
+          var result = JSON.parse(xhr.responseText);
+          resolve(result.item || result);
+        } catch {
+          reject(new Error('Could not upload the video.'));
+        }
+      };
+      xhr.onerror = function () {
+        reject(new Error('Could not reach the server. Check your connection.'));
+      };
+      var form = new FormData();
+      form.append('file', file, file.name || 'video.mp4');
+      xhr.send(form);
     });
   }
 
@@ -1496,7 +1521,7 @@
       '<input type="file" id="coverFile" accept="image/*" hidden></section>' +
 
       '<section class="modal-section"><p class="modal-section-title">Details</p><div class="form-grid">' +
-      '<div class="field span-2"><label for="projectTitle">Project title</label><input class="input" id="projectTitle" type="text" value="' + esc(project.title) + '" required>' +
+      '<div class="field span-2"><label for="projectTitle">Project title</label><input class="input" id="projectTitle" type="text" value="' + esc(project.title) + '">' +
       '<p class="field-error" id="titleError" hidden>Give the project a title.</p></div>' +
       '<div class="field"><label for="projectClient">Client or subtitle</label><input class="input" id="projectClient" type="text" value="' + esc(project.client) + '" placeholder="for Erfolg"></div>' +
       '<div class="field"><label for="projectCategory">Category</label><select class="input" id="projectCategory">' +
@@ -1518,11 +1543,13 @@
       '<button class="btn btn-ghost btn-sm" type="button" id="projectVideoClear" style="margin-left:8px">' + icon('trash') + 'Clear</button>' +
       '<div class="video-preview" id="projectVideoPreview" style="margin-top:8px;padding:12px;border:1px dashed var(--control);border-radius:var(--radius-control);background:var(--raised);font-size:12px;color:var(--muted);display:none">' +
       '<span class="video-preview-name" style="font-weight:600;color:var(--text)"></span>' +
-      ' <small style="color:var(--muted)">· Cloudinary upload</small>' +
+      ' <small style="color:var(--muted)">· uploaded</small>' +
       '<button class="btn btn-ghost btn-sm" type="button" id="projectVideoRemove" style="float:right;margin-top:-4px">' + icon('x') + '</button>' +
       '</div>' +
+      '<div class="video-progress" id="videoProgress" style="margin-top:8px;display:none;height:6px;background:var(--control);border-radius:3px;overflow:hidden">' +
+      '<div class="video-progress-bar" style="width:0%;height:100%;background:var(--accent)"></div>' +
       '</div>' +
-      '<p class="field-help">Upload a video file directly. It will be hosted on Cloudinary and embedded in the lightbox. Max 500 MB.</p></div>' +
+      '<p class="field-help">Upload a video file directly. It will be hosted and embedded in the lightbox. Max 500 MB.</p></div>' +
       '<div class="field span-2"><label for="projectDescription">Short description</label><textarea class="input" id="projectDescription" rows="3" placeholder="Optional note about the work">' + esc(project.description) + '</textarea></div>' +
       '</div></section>' +
 
@@ -1724,12 +1751,17 @@
       project.updatedAt = new Date().toISOString();
 
       var videoFile = dialog.querySelector('#projectVideoFile').files && dialog.querySelector('#projectVideoFile').files[0];
+      var videoProgress = dialog.querySelector('#videoProgress');
+      var videoProgressBar = dialog.querySelector('.video-progress-bar');
       if (videoFile) {
         var videoBtn = dialog.querySelector('#projectVideoChoose');
         videoBtn.disabled = true;
         videoBtn.textContent = 'Uploading…';
+        videoProgress.style.display = '';
         try {
-          var item = await uploadVideo(videoFile);
+          var item = await uploadVideo(videoFile, function (percent) {
+            if (videoProgressBar) videoProgressBar.style.width = percent + '%';
+          });
           project.videoUrl = item.url;
           dialog.querySelector('#projectVideoPreview').style.display = '';
           dialog.querySelector('#projectVideoPreview .video-preview-name').textContent = item.filename;
@@ -1737,10 +1769,14 @@
           toast(error.message || 'Video upload failed.', 'error');
           videoBtn.disabled = false;
           videoBtn.textContent = 'Choose video';
+          videoProgress.style.display = 'none';
+          if (videoProgressBar) videoProgressBar.style.width = '0%';
           return;
         } finally {
           videoBtn.disabled = false;
           videoBtn.textContent = 'Choose video';
+          videoProgress.style.display = 'none';
+          if (videoProgressBar) videoProgressBar.style.width = '0%';
         }
       }
 
@@ -1748,6 +1784,17 @@
         toast('Upload a video file so the lightbox has something to open.', 'error');
         dialog.querySelector('#projectVideoChoose').focus();
         return;
+      }
+
+      // Duplicate detection: same video URL already used by another project
+      if (project.videoUrl) {
+        var existing = state.data.projects.find(function (p) {
+          return p.id !== project.id && p.videoUrl === project.videoUrl;
+        });
+        if (existing) {
+          toast('This video is already used by another project ("' + esc(existing.title) + '").', 'error');
+          return;
+        }
       }
 
       if (isEdit) {
