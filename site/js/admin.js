@@ -650,42 +650,77 @@
     if (file.size > 500 * 1024 * 1024) {
       return Promise.reject(new Error('Choose a video smaller than 500 MB.'));
     }
+
     return new Promise(function (resolve, reject) {
-      var xhr = new XMLHttpRequest();
-      xhr.open('POST', '/api/video', true);
-      xhr.upload.onprogress = function (event) {
-        if (event.lengthComputable && onProgress) {
-          var percent = Math.round((event.loaded / event.total) * 100);
-          onProgress(percent);
-        }
-      };
-      xhr.onload = function () {
-        if (xhr.status === 401) {
-          reject(new Error('Your session expired. Sign in again.'));
-          return;
-        }
-        if (xhr.status >= 400) {
+      // Step 1: Get a signed upload URL from Netlify Functions
+      apiJson('/api/video-sign', { cache: 'no-store' }).then(function (result) {
+        if (!result.response.ok) {
           try {
-            var body = JSON.parse(xhr.responseText);
-            reject(new Error(body.error || 'Upload failed (status ' + xhr.status + ').'));
+            var body = JSON.parse(result.responseText);
+            reject(new Error(body.error || 'Could not get upload signature.'));
           } catch {
-            reject(new Error('Upload failed (status ' + xhr.status + ').'));
+            reject(new Error('Could not get upload signature.'));
           }
           return;
         }
-        try {
-          var result = JSON.parse(xhr.responseText);
-          resolve(result.item || result);
-        } catch {
-          reject(new Error('Could not upload the video.'));
-        }
-      };
-      xhr.onerror = function () {
-        reject(new Error('Could not reach the server. Check your connection.'));
-      };
-      var form = new FormData();
-      form.append('file', file, file.name || 'video.mp4');
-      xhr.send(form);
+        var signData = result.body;
+
+        // Step 2: Upload directly to Cloudinary (bypasses Netlify's 6 MB function limit)
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', signData.uploadUrl, true);
+        xhr.upload.onprogress = function (event) {
+          if (event.lengthComputable && onProgress) {
+            var percent = Math.round((event.loaded / event.total) * 100);
+            onProgress(percent);
+          }
+        };
+        xhr.onload = function () {
+          if (xhr.status === 401 || xhr.status === 403) {
+            reject(new Error('Your session expired. Sign in again.'));
+            return;
+          }
+          if (xhr.status >= 400) {
+            try {
+              var body = JSON.parse(xhr.responseText);
+              reject(new Error(body.error || 'Upload failed (status ' + xhr.status + ').'));
+            } catch {
+              reject(new Error('Upload failed (status ' + xhr.status + ').'));
+            }
+            return;
+          }
+          try {
+            var cloudBody = JSON.parse(xhr.responseText);
+            resolve({
+              id: cloudBody.public_id,
+              key: cloudBody.public_id,
+              filename: cloudBody.original_filename || file.name || 'video.mp4',
+              url: cloudBody.secure_url,
+              width: cloudBody.width,
+              height: cloudBody.height,
+              duration: cloudBody.duration,
+              size: cloudBody.bytes,
+              format: cloudBody.format,
+              createdAt: new Date().toISOString(),
+            });
+          } catch {
+            reject(new Error('Could not parse upload response.'));
+          }
+        };
+        xhr.onerror = function () {
+          reject(new Error('Could not reach Cloudinary. Check your connection.'));
+        };
+
+        var form = new FormData();
+        form.append('file', file, file.name || 'video.mp4');
+        form.append('api_key', signData.apiKey);
+        form.append('timestamp', String(signData.timestamp));
+        form.append('signature', signData.signature);
+        form.append('folder', signData.folder);
+
+        xhr.send(form);
+      }).catch(function (error) {
+        reject(error);
+      });
     });
   }
 
