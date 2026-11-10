@@ -374,11 +374,12 @@ export function createApiHandler({
     const cloudUrl = process.env.CLOUDINARY_URL;
     let cloudName, apiKey, apiSecret;
     if (cloudUrl) {
-      const match = cloudUrl.match(/^cloudinary:\/\/([^:]+):([^@]+)@(.+)$/);
+      const trimmed = cloudUrl.trim();
+      const match = trimmed.match(/^cloudinary:\/\/([^:]+):([^@]+)@(.+)$/);
       if (match) {
-        apiKey = match[1];
-        apiSecret = match[2];
-        cloudName = match[3];
+        apiKey = match[1].trim();
+        apiSecret = match[2].trim();
+        cloudName = match[3].trim();
       }
     } else {
       cloudName = process.env.CLOUDINARY_CLOUD_NAME;
@@ -387,7 +388,10 @@ export function createApiHandler({
     }
 
     if (!cloudName || !apiKey || !apiSecret) {
-      return json({ error: "Video upload is not configured on the server." }, 500);
+      return json(
+        { error: "Video upload is not configured on the server. Missing Cloudinary credentials." },
+        500,
+      );
     }
 
     const contentType = req.headers.get("content-type") || "";

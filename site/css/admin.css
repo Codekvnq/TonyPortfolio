@@ -2780,7 +2780,7 @@ select.select-inline {
   position: fixed;
   right: 22px;
   bottom: 22px;
-  z-index: 9999;
+  z-index: 2147483647;
   display: grid;
   gap: 8px;
   width: min(340px, calc(100vw - 32px));
