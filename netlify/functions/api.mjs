@@ -371,9 +371,20 @@ export function createApiHandler({
     const session = await requireSession(req, db);
     if (!session) return json({ error: "Sign in to continue." }, 401);
 
-    const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
-    const apiKey = process.env.CLOUDINARY_API_KEY;
-    const apiSecret = process.env.CLOUDINARY_API_SECRET;
+    const cloudUrl = process.env.CLOUDINARY_URL;
+    let cloudName, apiKey, apiSecret;
+    if (cloudUrl) {
+      const match = cloudUrl.match(/^cloudinary:\/\/([^:]+):([^@]+)@(.+)$/);
+      if (match) {
+        apiKey = match[1];
+        apiSecret = match[2];
+        cloudName = match[3];
+      }
+    } else {
+      cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+      apiKey = process.env.CLOUDINARY_API_KEY;
+      apiSecret = process.env.CLOUDINARY_API_SECRET;
+    }
 
     if (!cloudName || !apiKey || !apiSecret) {
       return json({ error: "Video upload is not configured on the server." }, 500);

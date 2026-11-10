@@ -653,7 +653,6 @@
     return new Promise(function (resolve, reject) {
       var xhr = new XMLHttpRequest();
       xhr.open('POST', '/api/video', true);
-      xhr.withCredentials = true;
       xhr.upload.onprogress = function (event) {
         if (event.lengthComputable && onProgress) {
           var percent = Math.round((event.loaded / event.total) * 100);
