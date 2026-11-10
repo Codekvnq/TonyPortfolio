@@ -716,6 +716,7 @@
         form.append('timestamp', String(signData.timestamp));
         form.append('signature', signData.signature);
         form.append('folder', signData.folder);
+        form.append('resource_type', 'video');
 
         xhr.send(form);
       }).catch(function (error) {
