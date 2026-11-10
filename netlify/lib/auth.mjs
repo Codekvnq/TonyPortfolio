@@ -13,6 +13,7 @@ export const DEFAULT_USERNAME = "admin";
 export const DEFAULT_PASSWORD = "admin123!";
 export const DEFAULT_ITERATIONS = 210_000;
 export const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7;
+export const REMEMBER_TTL_SECONDS = 60 * 60 * 24 * 30;
 export const SESSION_COOKIE = "admin_session";
 export const MIN_PASSWORD_LENGTH = 10;
 export const MAX_PASSWORD_LENGTH = 200;

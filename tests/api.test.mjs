@@ -31,6 +31,22 @@ test("default credentials log in and start a session", async () => {
   });
 });
 
+test("remember me extends the session to 30 days", async () => {
+  const handler = makeHandler(memoryStore());
+
+  const response = await call(handler, "POST", "/api/login", {
+    body: { username: "admin", password: "admin123!", remember: true },
+  });
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("set-cookie"), /Max-Age=2592000/);
+
+  const token = cookieValue(response);
+  const payload = JSON.parse(
+    Buffer.from(token.split(".")[0], "base64url").toString("utf8"),
+  );
+  assert.equal(payload.exp - payload.iat, 60 * 60 * 24 * 30);
+});
+
 test("wrong credentials are rejected without a cookie", async () => {
   const handler = makeHandler(memoryStore());
 

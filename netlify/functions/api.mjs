@@ -1,6 +1,8 @@
 import {
   DEFAULT_ITERATIONS,
+  REMEMBER_TTL_SECONDS,
   SESSION_COOKIE,
+  SESSION_TTL_SECONDS,
   clientIp,
   createAuthRecord,
   expiredSessionCookie,
@@ -408,11 +410,14 @@ export function createApiHandler({
     }
 
     await db.delete(key).catch(() => {});
+    const remember = body.value.remember === true;
+    const ttl = remember ? REMEMBER_TTL_SECONDS : SESSION_TTL_SECONDS;
     const secret = await loadSecret(db);
     const token = signSession({
       secret,
       username: record.username,
       version: record.version,
+      ttl,
       now: timestamp,
     });
 
@@ -420,7 +425,10 @@ export function createApiHandler({
       { ok: true, username: record.username, mustChange: Boolean(record.mustChange) },
       200,
       {
-        "set-cookie": sessionCookie(token, { secure: secureFor(req) }),
+        "set-cookie": sessionCookie(token, {
+          secure: secureFor(req),
+          maxAge: ttl,
+        }),
       },
     );
   }
