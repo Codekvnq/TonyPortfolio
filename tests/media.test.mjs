@@ -4,6 +4,7 @@ import {
   call,
   cookieValue,
   fakePng,
+  fakePdf,
   login,
   makeHandler,
   memoryStore,
@@ -184,4 +185,65 @@ test("media delivery serves immutable bytes and rejects bad keys", async () => {
     new Request("https://portfolio.test/media/0123456789abcdef0123456789abcdef.png"),
   );
   assert.equal(missing.status, 404);
+});
+
+test("CV upload stores a PDF and serves it with correct content type", async () => {
+  const store = memoryStore();
+  const { handler, cookie } = await signedIn(store);
+
+  const form = new FormData();
+  form.set("file", new Blob([fakePdf(64)]), "my-cv.pdf");
+  form.set("filename", "my-cv.pdf");
+
+  const headers = new Headers({
+    "x-forwarded-host": "portfolio.test",
+    "x-forwarded-proto": "https",
+  });
+  if (cookie) headers.set("cookie", `admin_session=${cookie}`);
+
+  const response = await handler(
+    new Request("https://portfolio.test/api/cv", {
+      method: "POST",
+      headers,
+      body: form,
+    }),
+  );
+  assert.equal(response.status, 201);
+  const body = await response.json();
+  assert.equal(body.ok, true);
+  assert.ok(body.item.key.endsWith(".pdf"));
+  assert.equal(body.item.filename, "my-cv.pdf");
+  assert.equal(body.item.size, 64);
+
+  const media = createMediaHandler({ store });
+  const path = "/" + body.item.key;
+  const served = await media(
+    new Request(`https://portfolio.test${path}`, { method: "GET" }),
+  );
+  assert.equal(served.status, 200);
+  assert.equal(served.headers.get("content-type"), "application/pdf");
+  const bytes = Buffer.from(await served.arrayBuffer());
+  assert.equal(bytes.toString("utf8", 0, 5), "%PDF-");
+
+  const again = await handler(
+    new Request("https://portfolio.test/api/cv", {
+      method: "POST",
+      headers,
+      body: form,
+    }),
+  );
+  assert.equal(again.status, 200);
+  assert.equal((await again.json()).existing, true);
+
+  const badForm = new FormData();
+  badForm.set("file", new Blob([fakePng(64)]), "photo.png");
+  badForm.set("filename", "photo.png");
+  const rejected = await handler(
+    new Request("https://portfolio.test/api/cv", {
+      method: "POST",
+      headers,
+      body: badForm,
+    }),
+  );
+  assert.equal(rejected.status, 415);
 });

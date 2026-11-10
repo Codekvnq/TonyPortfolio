@@ -33,6 +33,7 @@ import {
   MAX_THUMB_BYTES,
   deleteMedia,
   readMediaIndex,
+  saveCv,
   saveMedia,
 } from "../lib/media-store.mjs";
 import { getPortfolioStore, readJson, readText } from "../lib/store.mjs";
@@ -331,6 +332,39 @@ export function createApiHandler({
     return json({ ok: true, item: result.item });
   }
 
+  async function handleCvPost(req, db) {
+    const session = await requireSession(req, db);
+    if (!session) return json({ error: "Sign in to continue." }, 401);
+
+    const contentType = req.headers.get("content-type") || "";
+    if (!contentType.toLowerCase().includes("multipart/form-data")) {
+      return json({ error: "Expected a multipart PDF upload." }, 415);
+    }
+
+    let form;
+    try {
+      form = await req.formData();
+    } catch {
+      return json({ error: "Could not read the upload." }, 400);
+    }
+
+    const file = form.get("file");
+    if (!file || typeof file.arrayBuffer !== "function") {
+      return json({ error: "Choose a PDF file to upload." }, 400);
+    }
+
+    const result = await saveCv(db, {
+      file,
+      filename: form.get("filename") || file.name,
+      now: now(),
+    });
+    if (result.error) return json({ error: result.error }, result.status);
+    return json(
+      { ok: true, item: result.item, existing: Boolean(result.existing) },
+      result.existing ? 200 : 201,
+    );
+  }
+
   function throttleKey(req) {
     return `throttle/${hashIdentifier(clientIp(req))}`;
   }
@@ -617,6 +651,9 @@ export function createApiHandler({
       }
       if (req.method === "POST" && path === "/api/media") {
         return await handleMediaPost(req, db);
+      }
+      if (req.method === "POST" && path === "/api/cv") {
+        return await handleCvPost(req, db);
       }
       const mediaMatch = /^\/api\/media\/([^/]+)$/.exec(path);
       if (req.method === "DELETE" && mediaMatch) {

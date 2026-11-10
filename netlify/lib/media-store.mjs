@@ -134,6 +134,48 @@ export async function saveMedia(
   return { item: stored, existing: stored !== item };
 }
 
+export async function saveCv(
+  store,
+  { file, filename, now = Date.now() },
+) {
+  if (!file || typeof file.arrayBuffer !== "function" || typeof file.size !== "number") {
+    return { error: "Choose a PDF file to upload.", status: 400 };
+  }
+  const name = String(file.name || "").toLowerCase();
+  if (file.type !== "application/pdf" && !name.endsWith(".pdf")) {
+    return { error: "Upload a PDF file.", status: 415 };
+  }
+  if (file.size > MAX_FULL_BYTES) {
+    return { error: "The PDF must be 4 MB or smaller.", status: 413 };
+  }
+
+  const buffer = await file.arrayBuffer();
+  const hash = hashBytes(buffer);
+  const key = `media/${hash}.pdf`;
+
+  const existing = (await readMediaIndex(store)).items.find(
+    (item) => item.id === hash,
+  );
+  if (existing) return { item: existing, existing: true };
+
+  await store.set(key, buffer, { metadata: { contentType: "application/pdf" } });
+
+  const item = {
+    id: hash,
+    key,
+    thumbKey: key,
+    filename: cleanText(filename, 160) || "cv.pdf",
+    alt: "",
+    width: null,
+    height: null,
+    size: buffer.byteLength,
+    createdAt: new Date(now).toISOString(),
+  };
+
+  const stored = await addToIndex(store, item);
+  return { item: stored, existing: stored !== item };
+}
+
 async function removeFromIndex(store, id) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const entry = await readJson(store, INDEX_KEY);

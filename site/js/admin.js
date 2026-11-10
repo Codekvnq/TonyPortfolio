@@ -612,6 +612,31 @@
     });
   }
 
+  function uploadCv(file) {
+    if (!file) return Promise.reject(new Error('Choose a PDF file to upload.'));
+    if (file.size > 25 * 1024 * 1024) {
+      return Promise.reject(new Error('Choose a PDF smaller than 25 MB.'));
+    }
+    var name = String(file.name || '').toLowerCase();
+    if (file.type !== 'application/pdf' && !name.endsWith('.pdf')) {
+      return Promise.reject(new Error('Upload a PDF file.'));
+    }
+    var form = new FormData();
+    form.append('file', file, file.name || 'cv.pdf');
+    form.append('filename', file.name || 'cv.pdf');
+    return apiJson('/api/cv', { method: 'POST', body: form }, 60000).then(function (result) {
+      if (result.response.status === 401) {
+        var expired = new Error('Your session expired. Sign in again.');
+        expired.unauthorized = true;
+        throw expired;
+      }
+      if (!result.response.ok) {
+        throw new Error(result.body.error || 'Could not upload the CV.');
+      }
+      return result.body.item;
+    });
+  }
+
   function handleUploadError(error) {
     if (error && error.unauthorized) {
       expireSession(error.message);
@@ -1179,7 +1204,6 @@
   }
 
   function refreshProjectTable() {
-    state.data = Store.get();
     var projects = filteredProjects(state.data);
     var body = document.getElementById('projectTableBody');
     if (!body) return;
@@ -1976,6 +2000,9 @@
       '<div class="field span-2"><label for="resumeSummary">Short summary</label><textarea class="input" id="resumeSummary" rows="3" data-bind="resume.summary">' + esc(resume.summary) + '</textarea></div>' +
       '<div class="field"><label for="resumeCvFile">CV file name</label><input class="input" id="resumeCvFile" type="text" value="' + esc(resume.cvFile) + '" placeholder="MY PROFESSIONAL CV.pdf" data-bind="resume.cvFile"></div>' +
       '<div class="field"><label for="resumeCvUrl">CV file URL</label><input class="input" id="resumeCvUrl" type="text" value="' + esc(resume.cvUrl) + '" placeholder="pdf/MY PROFESSIONAL CV.pdf" data-bind="resume.cvUrl" spellcheck="false"></div>' +
+      '<div class="field"><label for="resumeCvUpload">Replace CV file</label>' +
+      '<input type="file" id="resumeCvUpload" accept="application/pdf" spellcheck="false">' +
+      '<p class="field-help">Upload a PDF to Netlify Blobs. Replaces the existing CV link.</p></div>' +
       '</div></section>' +
 
       '<section class="panel"><div class="panel-head"><div><h2 class="panel-title">Experience</h2><p class="panel-sub">Newest first, as shown on the resume.</p></div>' +
@@ -2004,12 +2031,29 @@
         return '<div style="padding:8px 0;border-top:1px solid #eef0f3"><strong style="display:block;font-size:11.5px">' + esc(item.role || 'Untitled role') + '</strong><small style="color:#667085;font-size:10.5px">' + esc(item.period) + ' · ' + esc(item.company) + '</small></div>';
       }).join('') + '</div></section></div></div></fieldset>';
 
-    html += '<p class="local-note">' + icon('info') + '<span>The CV file itself is not uploaded here yet. Point the URL at a PDF in the site’s pdf folder; uploading files needs storage on a server.</span></p>';
+    html += '<p class="local-note">' + icon('info') + '<span>Upload a CV PDF to Netlify Blobs. The link is saved to your resume and appears on the live resume page.</span></p>';
 
     pageContent.innerHTML = html;
     pageContent.oninput = handleResumeInput;
     pageContent.onchange = null;
     pageContent.onclick = handleResumeClick;
+
+    var cvUpload = document.getElementById('resumeCvUpload');
+    if (cvUpload) {
+      cvUpload.addEventListener('change', function () {
+        var file = this.files && this.files[0];
+        if (!file) return;
+        uploadCv(file).then(function (item) {
+          var src = '/' + item.key;
+          saveData(function (data) {
+            data.resume.cvUrl = src;
+            data.resume.cvFile = item.filename;
+          }, { toast: 'CV uploaded.' });
+          if (state.refreshPreview) state.refreshPreview(Store.get());
+          cvUpload.value = '';
+        }).catch(handleUploadError);
+      });
+    }
 
     state.refreshPreview = function (next) {
       var nextResume = next.resume;
@@ -2018,6 +2062,28 @@
       role.textContent = (nextResume.role || 'Role') + ' · ' + (nextResume.years || 'Experience');
       document.getElementById('resumePreviewSummary').textContent = nextResume.summary;
       document.getElementById('resumePreviewName').textContent = next.profile.name;
+
+      var cvLink = document.getElementById('resumePreviewCv');
+      if (cvLink) {
+        if (nextResume.cvUrl) {
+          cvLink.href = assetUrl(nextResume.cvUrl);
+          cvLink.className = 'btn btn-secondary btn-block';
+          cvLink.style.display = '';
+          cvLink.style.marginTop = '10px';
+          cvLink.innerHTML = icon('fileText') + ' Download CV';
+        } else {
+          cvLink.style.display = 'none';
+        }
+      }
+
+      var rolePreview = document.getElementById('resumeRolePreview');
+      if (rolePreview && nextResume.experience.length) {
+        rolePreview.innerHTML = nextResume.experience.slice(0, 3).map(function (item) {
+          return '<div style="padding:8px 0;border-top:1px solid #eef0f3"><strong style="display:block;font-size:11.5px">' + esc(item.role || 'Untitled role') + '</strong><small style="color:#667085;font-size:10.5px">' + esc(item.period) + ' · ' + esc(item.company) + '</small></div>';
+        }).join('');
+      } else if (rolePreview) {
+        rolePreview.innerHTML = '<p class="modal-hint">No roles yet.</p>';
+      }
     };
   }
 

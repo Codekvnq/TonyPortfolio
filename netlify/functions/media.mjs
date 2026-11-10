@@ -1,12 +1,14 @@
 import { getPortfolioStore } from "../lib/store.mjs";
 
-const KEY_PATTERN = /^[a-f0-9]{16,64}(-thumb)?\.(webp|jpg|png)$/;
+const KEY_PATTERN = /^[a-f0-9]{16,64}(-thumb)?\.(webp|jpg|png|pdf)$/;
 const CACHE = "public, max-age=31536000, immutable";
 
 function contentType(key) {
   if (key.endsWith(".webp")) return "image/webp";
   if (key.endsWith(".jpg")) return "image/jpeg";
-  return "image/png";
+  if (key.endsWith(".png")) return "image/png";
+  if (key.endsWith(".pdf")) return "application/pdf";
+  return "application/octet-stream";
 }
 
 function notFound() {

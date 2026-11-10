@@ -193,3 +193,12 @@ export function fakePng(bytes = 32) {
   buffer[7] = 0x0a;
   return buffer;
 }
+
+export function fakePdf(bytes = 32) {
+  const buffer = Buffer.alloc(bytes, 0);
+  const header = "%PDF-1.4";
+  for (let i = 0; i < header.length; i += 1) {
+    buffer[i] = header.charCodeAt(i);
+  }
+  return buffer;
+}
