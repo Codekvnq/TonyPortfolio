@@ -645,6 +645,26 @@
     });
   }
 
+  function uploadVideo(file) {
+    if (!file) return Promise.reject(new Error('Choose a video file to upload.'));
+    if (file.size > 500 * 1024 * 1024) {
+      return Promise.reject(new Error('Choose a video smaller than 500 MB.'));
+    }
+    var form = new FormData();
+    form.append('file', file, file.name || 'video.mp4');
+    return apiJson('/api/video', { method: 'POST', body: form }, 120000).then(function (result) {
+      if (result.response.status === 401) {
+        var expired = new Error('Your session expired. Sign in again.');
+        expired.unauthorized = true;
+        throw expired;
+      }
+      if (!result.response.ok) {
+        throw new Error(result.body.error || 'Could not upload the video.');
+      }
+      return result.body.item;
+    });
+  }
+
   function handleUploadError(error) {
     if (error && error.unauthorized) {
       expireSession(error.message);
@@ -1491,8 +1511,18 @@
       '<option value="published"' + (project.status === 'published' ? ' selected' : '') + '>Published</option>' +
       '<option value="draft"' + (project.status === 'draft' ? ' selected' : '') + '>Draft</option>' +
       '</select></div>' +
-      '<div class="field span-2"><label for="projectVideo">Video URL</label><input class="input" id="projectVideo" type="text" value="' + esc(project.videoUrl) + '" placeholder="https://youtu.be/… or video/MyLogoReview.html" spellcheck="false">' +
-      '<p class="field-help">Paste a YouTube or Vimeo link (unlisted is fine), or a page like video/MyLogoReview.html. The cover image acts as the poster.</p></div>' +
+      '<div class="field span-2"><label for="projectVideo">Video file</label>' +
+      '<div class="video-field">' +
+      '<input type="file" id="projectVideoFile" accept="video/*" hidden>' +
+      '<button class="btn btn-secondary btn-sm" type="button" id="projectVideoChoose">' + icon('upload') + 'Choose video</button>' +
+      '<button class="btn btn-ghost btn-sm" type="button" id="projectVideoClear" style="margin-left:8px">' + icon('trash') + 'Clear</button>' +
+      '<div class="video-preview" id="projectVideoPreview" style="margin-top:8px;padding:12px;border:1px dashed var(--control);border-radius:var(--radius-control);background:var(--raised);font-size:12px;color:var(--muted);display:none">' +
+      '<span class="video-preview-name" style="font-weight:600;color:var(--text)"></span>' +
+      ' <small style="color:var(--muted)">· Cloudinary upload</small>' +
+      '<button class="btn btn-ghost btn-sm" type="button" id="projectVideoRemove" style="float:right;margin-top:-4px">' + icon('x') + '</button>' +
+      '</div>' +
+      '</div>' +
+      '<p class="field-help">Upload a video file directly. It will be hosted on Cloudinary and embedded in the lightbox. Max 500 MB.</p></div>' +
       '<div class="field span-2"><label for="projectDescription">Short description</label><textarea class="input" id="projectDescription" rows="3" placeholder="Optional note about the work">' + esc(project.description) + '</textarea></div>' +
       '</div></section>' +
 
@@ -1595,6 +1625,35 @@
     dialog.querySelector('[data-choose-cover]').addEventListener('click', function () { coverFile.click(); });
     dialog.querySelector('[data-clear-cover]').addEventListener('click', function () { setCover(''); });
 
+    var videoFileInput = dialog.querySelector('#projectVideoFile');
+    var videoChooseBtn = dialog.querySelector('#projectVideoChoose');
+    var videoClearBtn = dialog.querySelector('#projectVideoClear');
+    var videoPreview = dialog.querySelector('#projectVideoPreview');
+    var videoPreviewName = dialog.querySelector('#projectVideoPreview .video-preview-name');
+    var videoRemoveBtn = dialog.querySelector('#projectVideoRemove');
+
+    videoChooseBtn.addEventListener('click', function () { videoFileInput.click(); });
+
+    videoFileInput.addEventListener('change', function () {
+      var file = this.files && this.files[0];
+      if (!file) return;
+      videoPreview.style.display = '';
+      videoPreviewName.textContent = file.name;
+      project.videoUrl = file.name; // placeholder until upload completes
+    });
+
+    videoClearBtn.addEventListener('click', function () {
+      videoFileInput.value = '';
+      project.videoUrl = '';
+      videoPreview.style.display = 'none';
+    });
+
+    videoRemoveBtn.addEventListener('click', function () {
+      videoFileInput.value = '';
+      project.videoUrl = '';
+      videoPreview.style.display = 'none';
+    });
+
     dialog.querySelector('[data-add-gallery-url]').addEventListener('click', function () {
       project.gallery.push('');
       renderGallery();
@@ -1658,15 +1717,36 @@
       project.category = dialog.querySelector('#projectCategory').value;
       project.type = dialog.querySelector('#projectType').value;
       project.status = dialog.querySelector('#projectStatus').value;
-      project.videoUrl = dialog.querySelector('#projectVideo').value.trim();
+      project.videoUrl = project.videoUrl || '';
       project.description = dialog.querySelector('#projectDescription').value.trim();
       project.cover = coverUrl.value.trim();
       project.gallery = project.gallery.map(function (src) { return String(src).trim(); }).filter(Boolean);
       project.updatedAt = new Date().toISOString();
 
+      var videoFile = dialog.querySelector('#projectVideoFile').files && dialog.querySelector('#projectVideoFile').files[0];
+      if (videoFile) {
+        var videoBtn = dialog.querySelector('#projectVideoChoose');
+        videoBtn.disabled = true;
+        videoBtn.textContent = 'Uploading…';
+        try {
+          var item = await uploadVideo(videoFile);
+          project.videoUrl = item.url;
+          dialog.querySelector('#projectVideoPreview').style.display = '';
+          dialog.querySelector('#projectVideoPreview .video-preview-name').textContent = item.filename;
+        } catch (error) {
+          toast(error.message || 'Video upload failed.', 'error');
+          videoBtn.disabled = false;
+          videoBtn.textContent = 'Choose video';
+          return;
+        } finally {
+          videoBtn.disabled = false;
+          videoBtn.textContent = 'Choose video';
+        }
+      }
+
       if (project.type === 'video' && !project.videoUrl) {
-        toast('Add the video page URL so the lightbox has something to open.', 'error');
-        dialog.querySelector('#projectVideo').focus();
+        toast('Upload a video file so the lightbox has something to open.', 'error');
+        dialog.querySelector('#projectVideoChoose').focus();
         return;
       }
 

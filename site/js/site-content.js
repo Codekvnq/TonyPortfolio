@@ -100,7 +100,13 @@
     var anchors = '';
 
     if (type === 'video' && project.videoUrl) {
-      anchors = '<a href="' + esc(videoEmbedUrl(project.videoUrl)) + '" data-title="' + esc(title) + '" class="lightbox mfp-iframe"></a>';
+      var videoUrl = videoEmbedUrl(project.videoUrl);
+      var isCloudinary = /res\.cloudinary\.com/.test(videoUrl);
+      if (isCloudinary) {
+        anchors = '<a href="' + esc(videoUrl) + '" target="_blank" rel="noopener" data-title="' + esc(title) + '" class="lightbox"></a>';
+      } else {
+        anchors = '<a href="' + esc(videoUrl) + '" data-title="' + esc(title) + '" class="lightbox mfp-iframe"></a>';
+      }
     } else {
       var gallery = (project.gallery && project.gallery.length ? project.gallery : [project.cover]).filter(Boolean);
       anchors = gallery.map(function (src) {

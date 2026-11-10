@@ -21,6 +21,7 @@ import {
   verifyPassword,
   verifySession,
 } from "../lib/auth.mjs";
+import { createHash } from "node:crypto";
 import {
   MAX_CONTENT_BYTES,
   listRevisions,
@@ -363,6 +364,108 @@ export function createApiHandler({
     return json(
       { ok: true, item: result.item, existing: Boolean(result.existing) },
       result.existing ? 200 : 201,
+    );
+  }
+
+  async function handleVideoPost(req, db) {
+    const session = await requireSession(req, db);
+    if (!session) return json({ error: "Sign in to continue." }, 401);
+
+    const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+    const apiKey = process.env.CLOUDINARY_API_KEY;
+    const apiSecret = process.env.CLOUDINARY_API_SECRET;
+
+    if (!cloudName || !apiKey || !apiSecret) {
+      return json({ error: "Video upload is not configured on the server." }, 500);
+    }
+
+    const contentType = req.headers.get("content-type") || "";
+    if (!contentType.toLowerCase().includes("multipart/form-data")) {
+      return json({ error: "Expected a multipart video upload." }, 415);
+    }
+
+    let form;
+    try {
+      form = await req.formData();
+    } catch {
+      return json({ error: "Could not read the upload." }, 400);
+    }
+
+    const file = form.get("file");
+    if (!file || typeof file.arrayBuffer !== "function") {
+      return json({ error: "Choose a video file to upload." }, 400);
+    }
+
+    const name = String(file.name || "").toLowerCase();
+    const videoTypes = [
+      ".mp4", ".webm", ".mov", ".avi", ".mkv", ".flv", ".wmv", ".3gp", ".ogg",
+    ];
+    if (
+      file.type !== "video/mp4" &&
+      file.type !== "video/webm" &&
+      file.type !== "video/quicktime" &&
+      file.type !== "video/x-msvideo" &&
+      file.type !== "video/x-matroska" &&
+      !videoTypes.some((ext) => name.endsWith(ext))
+    ) {
+      return json({ error: "Upload a video file (MP4, WebM, MOV, etc.)." }, 415);
+    }
+
+    const MAX_VIDEO_BYTES = 500 * 1024 * 1024; // 500 MB
+    if (file.size > MAX_VIDEO_BYTES) {
+      return json({ error: "The video must be 500 MB or smaller." }, 413);
+    }
+
+    const timestamp = Math.floor(Date.now() / 1000);
+    const signature = createHash("sha256")
+      .update(
+        `api_key=${apiKey}&timestamp=${timestamp}${apiSecret}`,
+      )
+      .digest("hex");
+
+    const uploadForm = new FormData();
+    uploadForm.append("file", file);
+    uploadForm.append("api_key", apiKey);
+    uploadForm.append("timestamp", String(timestamp));
+    uploadForm.append("signature", signature);
+    uploadForm.append("folder", "portfolio");
+    uploadForm.append("resource_type", "video");
+
+    let cloudResponse;
+    try {
+      cloudResponse = await fetch(
+        `https://api.cloudinary.com/v1_1/${cloudName}/video/upload`,
+        { method: "POST", body: uploadForm },
+      );
+    } catch {
+      return json({ error: "Could not reach Cloudinary. Try again later." }, 502);
+    }
+
+    const cloudBody = await cloudResponse.json().catch(() => ({}));
+    if (!cloudResponse.ok) {
+      return json(
+        { error: cloudBody.error?.message || "Cloudinary upload failed." },
+        cloudResponse.status >= 500 ? 502 : 400,
+      );
+    }
+
+    return json(
+      {
+        ok: true,
+        item: {
+          id: cloudBody.public_id,
+          key: cloudBody.public_id,
+          filename: cloudBody.original_filename || file.name || "video.mp4",
+          url: cloudBody.secure_url,
+          width: cloudBody.width,
+          height: cloudBody.height,
+          duration: cloudBody.duration,
+          size: cloudBody.bytes,
+          format: cloudBody.format,
+          createdAt: new Date().toISOString(),
+        },
+      },
+      201,
     );
   }
 
@@ -711,6 +814,9 @@ export function createApiHandler({
       }
       if (req.method === "POST" && path === "/api/cv") {
         return await handleCvPost(req, db);
+      }
+      if (req.method === "POST" && path === "/api/video") {
+        return await handleVideoPost(req, db);
       }
       const mediaMatch = /^\/api\/media\/([^/]+)$/.exec(path);
       if (req.method === "DELETE" && mediaMatch) {
