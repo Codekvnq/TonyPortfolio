@@ -680,6 +680,7 @@
     hydrateIcons(adminApp);
     pageContent.innerHTML = skeletonHtml();
     setSaveState('saved');
+    showGlobalLoading();
     return Store.ready().then(function (data) {
       state.data = data;
       state.snapshot = JSON.parse(JSON.stringify(data));
@@ -687,6 +688,7 @@
       state.data = Store.get();
       state.snapshot = JSON.parse(JSON.stringify(state.data));
     }).then(function () {
+      hideGlobalLoading();
       renderRoute();
       startIdleTracking();
     });
@@ -760,6 +762,7 @@
   }
 
   function doSignOut() {
+    showGlobalLoading();
     return apiJson('/api/logout', { method: 'POST' }).catch(function () {
       // The cookie expires on its own even if the request fails.
     }).then(function () {
@@ -773,8 +776,32 @@
       location.hash = '';
       hideBoot();
       showLogin();
+      hideGlobalLoading();
       toast('Signed out.', 'info');
     });
+  }
+
+  /* ------------------------------------------------------------------------
+     Loading overlays
+     ------------------------------------------------------------------------ */
+
+  var globalLoading = document.getElementById('globalLoading');
+  var loginLoading = document.getElementById('loginLoading');
+
+  function showGlobalLoading() {
+    if (globalLoading) globalLoading.classList.remove('hidden');
+  }
+
+  function hideGlobalLoading() {
+    if (globalLoading) globalLoading.classList.add('hidden');
+  }
+
+  function showLoginLoading() {
+    if (loginLoading) loginLoading.hidden = false;
+  }
+
+  function hideLoginLoading() {
+    if (loginLoading) loginLoading.hidden = true;
   }
 
   /* ------------------------------------------------------------------------
@@ -797,6 +824,7 @@
     }
     loginError.textContent = '';
     setLoginBusy(true);
+    showLoginLoading();
     apiJson('/api/login', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -817,6 +845,7 @@
       loginError.textContent = networkMessage(error);
     }).then(function () {
       setLoginBusy(false);
+      hideLoginLoading();
     });
   });
 
