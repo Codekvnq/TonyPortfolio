@@ -505,34 +505,10 @@ export function createApiHandler({
       // Best-effort; CSRF validation degrades gracefully if storage fails.
     }
 
-    // Increment credential version to invalidate all other sessions.
-    // Signing in on a new device logs out any existing signed-in devices.
-    const incrementedAuth = {
-      ...record,
-      version: Number(record.version || 0) + 1,
-      updatedAt: new Date(timestamp).toISOString(),
-    };
-    try {
-      const result = auth.etag
-        ? await db.setJSON(AUTH_KEY, incrementedAuth, { onlyIfMatch: auth.etag })
-        : await db.setJSON(AUTH_KEY, incrementedAuth);
-      if (!result || result.modified === false) {
-        return json(
-          { error: "Credentials changed in another session. Sign in again." },
-          409,
-        );
-      }
-    } catch {
-      return json(
-        { error: "Credentials changed in another session. Sign in again." },
-        409,
-      );
-    }
-
     const token = signSession({
       secret,
       username: record.username,
-      version: incrementedAuth.version,
+      version: record.version,
       ttl,
       now: timestamp,
     });
