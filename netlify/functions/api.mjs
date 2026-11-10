@@ -432,7 +432,7 @@ export function createApiHandler({
     }
 
     const timestamp = Math.floor(Date.now() / 1000);
-    const signatureString = `api_key=${apiKey}&folder=portfolio&timestamp=${timestamp}${apiSecret}`;
+    const signatureString = `api_key=${apiKey}&folder=portfolio&resource_type=video&timestamp=${timestamp}${apiSecret}`;
     const signature = createHash("sha256")
       .update(signatureString)
       .digest("hex");
