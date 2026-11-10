@@ -432,10 +432,9 @@ export function createApiHandler({
     }
 
     const timestamp = Math.floor(Date.now() / 1000);
+    const signatureString = `api_key=${apiKey}&folder=portfolio&timestamp=${timestamp}${apiSecret}`;
     const signature = createHash("sha256")
-      .update(
-        `api_key=${apiKey}&timestamp=${timestamp}${apiSecret}`,
-      )
+      .update(signatureString)
       .digest("hex");
 
     const uploadForm = new FormData();
@@ -576,10 +575,35 @@ export function createApiHandler({
     } catch {
       // Best-effort; CSRF validation degrades gracefully if storage fails.
     }
+
+    // Increment credential version to invalidate all other sessions.
+    // Signing in on a new device logs out any existing signed-in devices.
+    const incrementedAuth = {
+      ...record,
+      version: Number(record.version || 0) + 1,
+      updatedAt: new Date(timestamp).toISOString(),
+    };
+    try {
+      const result = auth.etag
+        ? await db.setJSON(AUTH_KEY, incrementedAuth, { onlyIfMatch: auth.etag })
+        : await db.setJSON(AUTH_KEY, incrementedAuth);
+      if (!result || result.modified === false) {
+        return json(
+          { error: "Credentials changed in another session. Sign in again." },
+          409,
+        );
+      }
+    } catch {
+      return json(
+        { error: "Credentials changed in another session. Sign in again." },
+        409,
+      );
+    }
+
     const token = signSession({
       secret,
       username: record.username,
-      version: record.version,
+      version: incrementedAuth.version,
       ttl,
       now: timestamp,
     });
