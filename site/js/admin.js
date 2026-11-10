@@ -1561,7 +1561,7 @@
       });
     }
 
-    dialog.querySelector('#projectForm').addEventListener('submit', function (event) {
+    dialog.querySelector('#projectForm').addEventListener('submit', async function (event) {
       event.preventDefault();
       var title = dialog.querySelector('#projectTitle').value.trim();
       var titleError = dialog.querySelector('#titleError');
@@ -1599,6 +1599,8 @@
           data.projects.unshift(project);
         }, { toast: 'Project added to the portfolio.' });
       }
+
+      await flushSave();
 
       dialog.close();
       dialog.remove();
