@@ -1869,6 +1869,16 @@
     pageContent.onclick = handleSocialClick;
     pageContent.oninput = handleSocialInput;
     pageContent.onchange = handleSocialChange;
+    pageContent.onblur = function (event) {
+      var urlField = event.target.closest('[data-social-url]');
+      if (!urlField) return;
+      var id = urlField.closest('[data-social-id]').getAttribute('data-social-id');
+      var value = urlField.value;
+      saveData(function (data) {
+        var social = data.socials.find(function (item) { return item.id === id; });
+        if (social) social.url = value;
+      }, { toast: 'Link URL updated.' });
+    };
 
     state.refreshPreview = function (next) {
       var preview = document.getElementById('socialPreview');
@@ -1901,7 +1911,7 @@
     }, { toast: 'Platform updated.' });
     var list = document.getElementById('socialList');
     if (list) {
-      list.innerHTML = socialRowsHtml(Store.get());
+      list.innerHTML = socialRowsHtml(state.data);
       hydrateIcons(list);
     }
   }
