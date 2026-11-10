@@ -41,7 +41,9 @@
     session: null,
     username: '',
     mustChange: false,
-    loading: false
+    loading: false,
+    idleTimeout: null,
+    accountEditing: false
   };
 
   var saveTimer = null;
@@ -677,6 +679,7 @@
       state.snapshot = JSON.parse(JSON.stringify(state.data));
     }).then(function () {
       renderRoute();
+      startIdleTracking();
     });
   }
 
@@ -755,6 +758,8 @@
       state.username = '';
       state.mustChange = false;
       state.editing = false;
+      state.accountEditing = false;
+      stopIdleTimers();
       state.data = Store.get();
       location.hash = '';
       hideBoot();
@@ -2228,6 +2233,14 @@
       '<div><dt>Signed in as</dt><dd>' + esc(state.username || '—') + '</dd></div>' +
       '<div><dt>Session length</dt><dd>7 days, or 30 days with “Keep me signed in”.</dd></div>' +
       '<div><dt>Stored on</dt><dd>A secure HttpOnly cookie on this device.</dd></div>' +
+      '<div><dt>Auto sign-out after inactivity</dt><dd>' +
+      '<select class="input" id="accountIdleTimeout" data-account-action="set-idle-timeout" style="width:140px;max-width:100%">' +
+      '<option value="0"' + (state.idleTimeout === 0 ? ' selected' : '') + '>Never</option>' +
+      '<option value="5"' + (state.idleTimeout === 5 ? ' selected' : '') + '>5 minutes</option>' +
+      '<option value="15"' + (state.idleTimeout === 15 ? ' selected' : '') + '>15 minutes</option>' +
+      '<option value="30"' + (state.idleTimeout === 30 ? ' selected' : '') + '>30 minutes</option>' +
+      '<option value="60"' + (state.idleTimeout === 60 ? ' selected' : '') + '>1 hour</option>' +
+      '</select></dd></div>' +
       '</dl><button class="btn btn-secondary btn-block" type="button" data-account-action="sign-out">' + icon('logout') + 'Sign out</button></div></section>' +
       '<section class="panel"><div class="panel-head"><div><h2 class="panel-title">Good to know</h2></div></div>' +
       '<div class="panel-body"><p class="panel-sub">Changing your password signs out other devices the next time they try to save. This device stays signed in.</p></div></section>' +
@@ -2272,6 +2285,20 @@
       input.type = showing ? 'password' : 'text';
       button.setAttribute('aria-pressed', String(!showing));
       button.setAttribute('aria-label', showing ? 'Show password' : 'Hide password');
+      return;
+    }
+    if (name === 'set-idle-timeout') {
+      var select = document.getElementById('accountIdleTimeout');
+      if (select) {
+        state.idleTimeout = Number(select.value);
+        try {
+          window.localStorage.setItem('anthonyPortfolio.idleTimeout', String(state.idleTimeout));
+        } catch (error) {
+          // Storage blocked; setting applies for this session only.
+        }
+        resetIdleTimer();
+        toast('Auto sign-out timeout set to ' + (state.idleTimeout === 0 ? 'never' : state.idleTimeout + ' minutes').toLowerCase() + '.', 'info');
+      }
       return;
     }
   }
@@ -2338,6 +2365,97 @@
       button.disabled = false;
       button.textContent = 'Save changes';
     });
+  }
+
+  /* ------------------------------------------------------------------------
+     Inactivity auto sign-out
+     ------------------------------------------------------------------------ */
+
+  var IDLE_WARN_SECONDS = 30;
+  var idleTimer = null;
+  var idleWarnTimer = null;
+  var idleWarningShown = false;
+
+  function initIdleTimeout() {
+    var stored = null;
+    try {
+      stored = window.localStorage.getItem('anthonyPortfolio.idleTimeout');
+    } catch (error) {
+      // Storage blocked; defaults apply.
+    }
+    state.idleTimeout = stored ? Number(stored) : 30;
+    if (!Number.isFinite(state.idleTimeout) || state.idleTimeout < 0) {
+      state.idleTimeout = 30;
+    }
+  }
+
+  function resetIdleTimer() {
+    if (!state.idleTimeout || state.idleTimeout <= 0) {
+      stopIdleTimers();
+      return;
+    }
+    stopIdleTimers();
+    idleTimer = window.setTimeout(showIdleWarning, state.idleTimeout * 60 * 1000 - IDLE_WARN_SECONDS * 1000);
+  }
+
+  function stopIdleTimers() {
+    if (idleTimer) { window.clearTimeout(idleTimer); idleTimer = null; }
+    if (idleWarnTimer) { window.clearTimeout(idleWarnTimer); idleWarnTimer = null; }
+    idleWarningShown = false;
+    var warn = document.getElementById('idleWarning');
+    if (warn) warn.classList.add('hidden');
+  }
+
+  function showIdleWarning() {
+    if (idleWarningShown) return;
+    idleWarningShown = true;
+    var remaining = IDLE_WARN_SECONDS;
+
+    var dialog = document.createElement('div');
+    dialog.id = 'idleWarning';
+    dialog.className = 'idle-warning';
+    dialog.innerHTML =
+      '<div class="idle-card">' +
+      '<h2 style="margin:0 0 8px;font-size:15px">Session will expire soon</h2>' +
+      '<p style="margin:0 0 12px;color:rgba(255,255,255,0.9);font-size:13px">You have been inactive. Sign out now or stay signed in.</p>' +
+      '<div class="idle-countdown" id="idleCountdown">' + remaining + 's</div>' +
+      '<button class="btn btn-primary" type="button" id="idleStaySignedIn" style="margin-top:16px">Stay signed in</button>' +
+      '</div>';
+    document.body.appendChild(dialog);
+
+    var countdown = document.getElementById('idleCountdown');
+    var count = remaining;
+    idleWarnTimer = window.setInterval(function () {
+      count -= 1;
+      if (countdown) countdown.textContent = count + 's';
+      if (count <= 0) {
+        window.clearInterval(idleWarnTimer);
+        idleWarnTimer = null;
+        doSignOut();
+      }
+    }, 1000);
+
+    document.getElementById('idleStaySignedIn').addEventListener('click', function () {
+      stopIdleTimers();
+      resetIdleTimer();
+    });
+  }
+
+  function trackIdleActivity() {
+    if (!state.idleTimeout || state.idleTimeout <= 0) return;
+    if (idleWarningShown) {
+      stopIdleTimers();
+      idleWarningShown = false;
+    }
+    resetIdleTimer();
+  }
+
+  function startIdleTracking() {
+    initIdleTimeout();
+    ['mousemove', 'keydown', 'scroll', 'click', 'touchstart'].forEach(function (evt) {
+      document.addEventListener(evt, trackIdleActivity, true);
+    });
+    resetIdleTimer();
   }
 
   /* ------------------------------------------------------------------------

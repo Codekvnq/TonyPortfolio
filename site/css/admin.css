@@ -3467,6 +3467,120 @@ select.select-inline {
   background: var(--danger-bg);
 }
 
+/* Media library enhancements --------------------------------------------- */
+
+.media-card {
+  transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
+}
+
+.media-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(16, 24, 40, 0.08);
+  border-color: var(--control);
+}
+
+.media-card:hover .media-actions {
+  opacity: 1;
+  visibility: visible;
+}
+
+.media-actions {
+  opacity: 0.7;
+  visibility: hidden;
+  transition: opacity 120ms ease, visibility 120ms ease;
+}
+
+.media-actions:hover {
+  opacity: 1;
+}
+
+/* History enhancements --------------------------------------------------- */
+
+.history-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.history-table th,
+.history-table td {
+  padding: 10px 14px;
+  text-align: left;
+  border-bottom: 1px solid var(--rule);
+}
+
+.history-table th {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.history-table tr:hover {
+  background: var(--raised);
+}
+
+.history-table td.version-cell strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.history-table td.time-cell {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.history-table .pill {
+  font-size: 10.5px;
+  padding: 2px 8px;
+}
+
+/* Idle / inactivity warning --------------------------------------------- */
+
+.idle-warning {
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: 250;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(180, 39, 24, 0.95);
+  color: #fff;
+  padding: 24px;
+  text-align: center;
+}
+
+.idle-warning.hidden {
+  display: none;
+}
+
+.idle-warning .idle-card {
+  max-width: 360px;
+}
+
+.idle-warning .idle-countdown {
+  font-size: 20px;
+  font-weight: 700;
+  margin-top: 12px;
+}
+
+.idle-reset-btn {
+  margin-top: 16px;
+  padding: 10px 20px;
+  background: #fff;
+  color: var(--danger);
+  border: 0;
+  border-radius: var(--radius-control);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.idle-reset-btn:hover {
+  background: var(--danger-bg);
+}
+
 /* Upload states on image fields ------------------------------------------ */
 
 .image-drop.is-uploading,
