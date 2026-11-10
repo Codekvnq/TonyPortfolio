@@ -477,7 +477,7 @@ export function createApiHandler({
       {
         "set-cookie": sessionCookie(token, {
           secure: secureFor(req),
-          maxAge: ttl,
+          maxAge: remember ? REMEMBER_TTL_SECONDS : undefined,
         }),
       },
     );

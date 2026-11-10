@@ -159,10 +159,15 @@ export function verifySession({
   return payload;
 }
 
-export function sessionCookie(token, { secure, maxAge = SESSION_TTL_SECONDS }) {
-  return `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${
-    secure ? "; Secure" : ""
-  }`;
+export function sessionCookie(token, { secure, maxAge }) {
+  let cookie = `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Strict`;
+  if (maxAge !== undefined) {
+    cookie += `; Max-Age=${maxAge}`;
+  }
+  if (secure) {
+    cookie += "; Secure";
+  }
+  return cookie;
 }
 
 export function expiredSessionCookie({ secure }) {

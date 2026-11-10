@@ -90,7 +90,10 @@ test("cookie helpers set the security attributes", () => {
   assert.match(cookie, /HttpOnly/);
   assert.match(cookie, /SameSite=Strict/);
   assert.match(cookie, /Secure/);
-  assert.match(cookie, /Max-Age=604800/);
+  assert.doesNotMatch(cookie, /Max-Age/);
+
+  const rememberCookie = sessionCookie("abc.def", { secure: true, maxAge: 2592000 });
+  assert.match(rememberCookie, /Max-Age=2592000/);
 
   const cleared = expiredSessionCookie({ secure: false });
   assert.match(cleared, /Max-Age=0/);
