@@ -769,7 +769,8 @@ export function createApiHandler({
       return json({ error: "Not found." }, 404);
     } catch (error) {
       console.error("admin api error", error);
-      return json({ error: "Something went wrong. Try again." }, 500);
+      const msg = error.message || "Something went wrong.";
+      return json({ error: msg }, 500);
     }
   };
 }
