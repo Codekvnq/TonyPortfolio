@@ -718,6 +718,38 @@
     showNotice();
   }
 
+  /* ------------------------------------------------------------------------
+     Real-time session validity check
+     ------------------------------------------------------------------------ */
+
+  var sessionCheckInterval = null;
+
+  function checkSessionValidity() {
+    if (!state.session) return;
+    return apiJson('/api/session', { cache: 'no-store' }).then(function (result) {
+      if (!result.response.ok || !result.body || !result.body.authenticated) {
+        expireSession('Your session expired. Sign in again.');
+      }
+    }).catch(function () {
+      // Network error; session state unchanged, will retry on next check.
+    });
+  }
+
+  function startSessionValidityCheck() {
+    stopSessionValidityCheck();
+    sessionCheckInterval = window.setInterval(checkSessionValidity, 30000);
+    ['click', 'keydown', 'scroll'].forEach(function (evt) {
+      document.addEventListener(evt, checkSessionValidity, { passive: true });
+    });
+  }
+
+  function stopSessionValidityCheck() {
+    if (sessionCheckInterval) {
+      window.clearInterval(sessionCheckInterval);
+      sessionCheckInterval = null;
+    }
+  }
+
   function enterApp() {
     loginView.hidden = true;
     adminApp.hidden = false;
@@ -735,6 +767,7 @@
       hideGlobalLoading();
       renderRoute();
       startIdleTracking();
+      startSessionValidityCheck();
     });
   }
 
@@ -761,6 +794,7 @@
     state.username = '';
     state.mustChange = false;
     state.editing = false;
+    stopSessionValidityCheck();
     showLogin();
     loginError.textContent = message || 'Your session expired. Sign in again.';
   }
@@ -816,6 +850,7 @@
       state.editing = false;
       state.accountEditing = false;
       stopIdleTimers();
+      stopSessionValidityCheck();
       state.data = Store.get();
       location.hash = '';
       hideBoot();

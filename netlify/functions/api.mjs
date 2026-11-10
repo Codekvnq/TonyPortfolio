@@ -432,7 +432,9 @@ export function createApiHandler({
     }
 
     const timestamp = Math.floor(Date.now() / 1000);
-    const signatureString = `api_key=${apiKey}&folder=portfolio&resource_type=video&timestamp=${timestamp}${apiSecret}`;
+    // Cloudinary signature must include ALL parameters except 'file' and 'signature',
+    // sorted alphabetically. resource_type is implied by /video/upload endpoint.
+    const signatureString = `api_key=${apiKey}&folder=portfolio&timestamp=${timestamp}${apiSecret}`;
     const signature = createHash("sha256")
       .update(signatureString)
       .digest("hex");
@@ -443,7 +445,6 @@ export function createApiHandler({
     uploadForm.append("timestamp", String(timestamp));
     uploadForm.append("signature", signature);
     uploadForm.append("folder", "portfolio");
-    uploadForm.append("resource_type", "video");
 
     let cloudResponse;
     try {
