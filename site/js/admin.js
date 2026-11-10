@@ -2,15 +2,15 @@
   'use strict';
 
   var Store = window.PortfolioContent;
-  var AUTH_KEY = 'portfolioAdminSession';
-  var AUTH_USER = 'admin';
-  var AUTH_PASSWORD = 'admin123!';
-  var sessionMemory = false;
 
   var loginView = document.getElementById('loginView');
+  var bootView = document.getElementById('bootView');
+  var bootNote = document.getElementById('bootNote');
   var adminApp = document.getElementById('adminApp');
+  var adminNotice = document.getElementById('adminNotice');
   var loginForm = document.getElementById('loginForm');
   var loginError = document.getElementById('loginError');
+  var loginButton = loginForm.querySelector('button[type="submit"]');
   var pageContent = document.getElementById('pageContent');
   var pageCrumb = document.getElementById('pageCrumb');
   var sidebar = document.getElementById('sidebar');
@@ -28,7 +28,6 @@
   var navDraftCount = document.getElementById('navDraftCount');
   var toastRegion = document.getElementById('toastRegion');
   var dialogRoot = document.getElementById('dialogRoot');
-  var footerStorageNote = document.getElementById('footerStorageNote');
 
   var state = {
     route: 'overview',
@@ -38,10 +37,16 @@
     data: Store.get(),
     refreshPreview: null,
     snapshot: null,
-    editing: false
+    editing: false,
+    session: null,
+    username: '',
+    mustChange: false,
+    loading: false
   };
 
   var saveTimer = null;
+  var savingNow = false;
+  var savePending = false;
 
   /* ------------------------------------------------------------------------
      Icons
@@ -129,6 +134,63 @@
     });
   }
 
+  function apiRequest(path, options, timeout) {
+    var config = Object.assign({
+      credentials: 'same-origin',
+      headers: { accept: 'application/json' }
+    }, options || {});
+    var control = window.AbortController ? new window.AbortController() : null;
+    if (control) config.signal = control.signal;
+    var timer = control
+      ? window.setTimeout(function () { control.abort(); }, timeout || 12000)
+      : null;
+
+    return window.fetch(path, config).then(function (response) {
+      if (timer) window.clearTimeout(timer);
+      return response;
+    }, function (error) {
+      if (timer) window.clearTimeout(timer);
+      throw error;
+    });
+  }
+
+  function apiJson(path, options, timeout) {
+    return apiRequest(path, options, timeout).then(function (response) {
+      return response.text().then(function (text) {
+        var body = {};
+        if (text) {
+          try { body = JSON.parse(text); } catch (error) { body = {}; }
+        }
+        return { response: response, body: body };
+      });
+    });
+  }
+
+  function networkMessage(error) {
+    if (error && error.name === 'AbortError') {
+      return 'The server took too long to respond. Check your connection and try again.';
+    }
+    return 'Could not reach the server. Check your connection and try again.';
+  }
+
+  function skeletonHtml() {
+    var rows = '';
+    for (var index = 0; index < 5; index += 1) {
+      rows += '<div class="skeleton-row"><span class="skeleton skeleton-avatar"></span>' +
+        '<span class="skeleton skeleton-line wide"></span><span class="skeleton skeleton-line"></span>' +
+        '<span class="skeleton skeleton-pill"></span></div>';
+    }
+    return '<div class="skeleton-page" aria-hidden="true">' +
+      '<div class="skeleton-head"><span class="skeleton skeleton-title"></span><span class="skeleton skeleton-button"></span></div>' +
+      '<div class="skeleton-kpis"><span class="skeleton skeleton-kpi"></span><span class="skeleton skeleton-kpi"></span><span class="skeleton skeleton-kpi"></span><span class="skeleton skeleton-kpi"></span></div>' +
+      '<div class="skeleton-panel">' + rows + '</div></div>';
+  }
+
+  function setLoginBusy(busy, label) {
+    loginButton.disabled = busy;
+    loginButton.textContent = busy ? (label || 'Signing in…') : 'Sign in';
+  }
+
   // The admin lives in /admin/, so site-relative assets need one level up.
   function assetUrl(src) {
     if (!src) return '';
@@ -172,6 +234,14 @@
     var hours = Math.round(minutes / 60);
     if (hours < 24) return hours + (hours === 1 ? ' hour ago' : ' hours ago');
     return formatDate(iso);
+  }
+
+  function formatBytes(bytes) {
+    var size = Number(bytes);
+    if (!size || size < 0) return '—';
+    if (size < 1024) return size + ' B';
+    if (size < 1024 * 1024) return Math.round(size / 1024) + ' KB';
+    return (size / (1024 * 1024)).toFixed(1) + ' MB';
   }
 
   function toNumber(value, fallback) {
@@ -231,24 +301,100 @@
     saveText.textContent = mode === 'saving' ? 'Saving…' : mode === 'error' ? 'Not saved' : 'Saved';
   }
 
+  function showNotice() {
+    if (!adminNotice) return;
+    if (state.mustChange) {
+      adminNotice.hidden = false;
+      adminNotice.innerHTML = icon('alert') +
+        '<span>You are still using the default password. <a href="#/account">Change your account</a> to protect the admin.</span>' +
+        '<button class="icon-btn" type="button" data-dismiss-notice aria-label="Dismiss">' + icon('x') + '</button>';
+      var dismiss = adminNotice.querySelector('[data-dismiss-notice]');
+      if (dismiss) {
+        dismiss.addEventListener('click', function () {
+          adminNotice.hidden = true;
+          adminNotice.innerHTML = '';
+        });
+      }
+      return;
+    }
+    adminNotice.hidden = true;
+    adminNotice.innerHTML = '';
+  }
+
+  function handleConflict() {
+    setSaveState('error');
+    toast('Content changed in another tab or device. Reloading the latest version…', 'error');
+    state.editing = false;
+    return Store.refresh({ force: true, fresh: true }).then(function (data) {
+      state.data = data;
+      state.snapshot = JSON.parse(JSON.stringify(data));
+      renderRoute();
+    });
+  }
+
+  function flushSave() {
+    window.clearTimeout(saveTimer);
+    saveTimer = null;
+    if (savingNow) {
+      savePending = true;
+      return Promise.resolve();
+    }
+    if (!state.data) return Promise.resolve();
+
+    savingNow = true;
+    setSaveState('saving');
+    var payload = JSON.parse(JSON.stringify(state.data));
+
+    return Store.save(payload).then(function (result) {
+      if (result.unauthorized) {
+        expireSession('Your session expired. Sign in again.');
+        return;
+      }
+      if (result.conflict) {
+        return handleConflict();
+      }
+      if (!result.ok) {
+        setSaveState('error');
+        toast(result.error || 'Could not save your changes.', 'error');
+        return;
+      }
+      if (!savePending && !saveTimer) {
+        state.data = result.data;
+        state.snapshot = JSON.parse(JSON.stringify(result.data));
+      }
+      setSaveState('saved');
+      updateDraftBadge();
+      renderNotifications(state.data);
+      if (state.refreshPreview) state.refreshPreview(state.data);
+    }).catch(function (error) {
+      setSaveState('error');
+      toast(networkMessage(error), 'error');
+    }).then(function () {
+      savingNow = false;
+      if (savePending) {
+        savePending = false;
+        saveTimer = window.setTimeout(flushSave, 250);
+      }
+    });
+  }
+
+  function queueSave(delay) {
+    window.clearTimeout(saveTimer);
+    saveTimer = window.setTimeout(flushSave, delay === undefined ? 650 : delay);
+  }
+
   function saveData(mutator, options) {
     var opts = options || {};
-    var result = Store.update(function (data) {
-      mutator(data);
-    });
-    if (!result.ok) {
-      setSaveState('error');
-      toast('Could not save. Browser storage is full or blocked.', 'error');
-      return result;
-    }
-    state.data = result.data;
-    setSaveState('saving');
-    window.clearTimeout(saveTimer);
-    saveTimer = window.setTimeout(function () { setSaveState('saved'); }, 320);
+    var next = JSON.parse(JSON.stringify(state.data));
+    mutator(next);
+    next.meta = Object.assign({}, next.meta, { updatedAt: new Date().toISOString() });
+    state.data = next;
+
     updateDraftBadge();
-    if (state.refreshPreview) state.refreshPreview(result.data);
+    if (state.refreshPreview) state.refreshPreview(next);
     if (opts.toast) toast(opts.toast);
-    return result;
+    queueSave(opts.immediate ? 0 : 650);
+    return Promise.resolve(next);
   }
 
   function rerenderPreservingSnapshot() {
@@ -292,9 +438,14 @@
     }
 
     if (action === 'save') {
-      saveData(function () { }, { toast: 'Changes saved.' });
-      state.editing = false;
-      renderRoute();
+      var saved = state.data;
+      state.data = saved;
+      flushSave().then(function () {
+        state.editing = false;
+        state.data = Store.get();
+        state.snapshot = JSON.parse(JSON.stringify(state.data));
+        renderRoute();
+      });
       return;
     }
 
@@ -307,15 +458,16 @@
         danger: true
       }).then(function (confirmed) {
         if (!confirmed) return;
-        var result = Store.save(state.snapshot || Store.get());
-        if (!result.ok) {
-          toast('Could not restore the earlier content.', 'error');
-          return;
-        }
-        state.data = result.data;
-        state.editing = false;
-        renderRoute();
-        toast('Changes discarded.', 'info');
+        return Store.save(state.snapshot || Store.get()).then(function (result) {
+          if (!result.ok) {
+            toast(result.error || 'Could not restore the earlier content.', 'error');
+            return;
+          }
+          state.data = result.data;
+          state.editing = false;
+          renderRoute();
+          toast('Changes discarded.', 'info');
+        });
       });
     }
   }
@@ -380,63 +532,130 @@
     return dialog;
   }
 
-  function compressImage(file, callback) {
-    var reader = new FileReader();
-    reader.onload = function () {
+  function canvasBlob(canvas, type, quality) {
+    return new Promise(function (resolve) {
+      if (!canvas.toBlob) { resolve(null); return; }
+      canvas.toBlob(function (blob) { resolve(blob); }, type, quality);
+    });
+  }
+
+  function encodeImage(canvas, quality) {
+    return canvasBlob(canvas, 'image/webp', quality).then(function (blob) {
+      if (blob) return blob;
+      return canvasBlob(canvas, 'image/jpeg', quality);
+    });
+  }
+
+  function prepareImage(file, maxSize, quality) {
+    return new Promise(function (resolve, reject) {
+      if (!file || !/^image\//i.test(file.type) || /svg/i.test(file.type)) {
+        reject(new Error('Use a WebP, JPEG or PNG image.'));
+        return;
+      }
+      var url = URL.createObjectURL(file);
       var image = new Image();
       image.onload = function () {
-        var max = 1200;
-        var ratio = Math.min(1, max / Math.max(image.width, image.height));
+        URL.revokeObjectURL(url);
+        var ratio = Math.min(1, maxSize / Math.max(image.width, image.height));
+        var width = Math.max(1, Math.round(image.width * ratio));
+        var height = Math.max(1, Math.round(image.height * ratio));
         var canvas = document.createElement('canvas');
-        canvas.width = Math.round(image.width * ratio);
-        canvas.height = Math.round(image.height * ratio);
-        canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
-        var type = file.type === 'image/png' || file.type === 'image/webp' ? 'image/jpeg' : 'image/jpeg';
-        callback(canvas.toDataURL(type, 0.82));
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext('2d').drawImage(image, 0, 0, width, height);
+        encodeImage(canvas, quality).then(function (blob) {
+          if (!blob) {
+            reject(new Error('That file could not be prepared for upload.'));
+            return;
+          }
+          resolve({ blob: blob, width: width, height: height });
+        }, reject);
       };
-      image.onerror = function () { callback(null); };
-      image.src = reader.result;
-    };
-    reader.onerror = function () { callback(null); };
-    reader.readAsDataURL(file);
+      image.onerror = function () {
+        URL.revokeObjectURL(url);
+        reject(new Error('That file could not be read as an image.'));
+      };
+      image.src = url;
+    });
+  }
+
+  function uploadImage(file, options) {
+    var opts = options || {};
+    if (!file) return Promise.reject(new Error('Choose an image to upload.'));
+    if (file.size > 25 * 1024 * 1024) {
+      return Promise.reject(new Error('Choose an image smaller than 25 MB.'));
+    }
+
+    return prepareImage(file, 1600, 0.84).then(function (full) {
+      return prepareImage(file, 520, 0.8).then(function (thumb) {
+        var base = String(file.name || 'image').replace(/\.[^.]+$/, '') || 'image';
+        var form = new FormData();
+        form.append('full', full.blob, base + '.webp');
+        form.append('thumb', thumb.blob, base + '-thumb.webp');
+        form.append('filename', file.name || base + '.webp');
+        form.append('alt', opts.alt || '');
+        form.append('width', String(full.width));
+        form.append('height', String(full.height));
+        return apiJson('/api/media', { method: 'POST', body: form }, 60000);
+      });
+    }).then(function (result) {
+      if (result.response.status === 401) {
+        var expired = new Error('Your session expired. Sign in again.');
+        expired.unauthorized = true;
+        throw expired;
+      }
+      if (!result.response.ok) {
+        throw new Error(result.body.error || 'Could not upload the image.');
+      }
+      return result.body.item;
+    });
+  }
+
+  function handleUploadError(error) {
+    if (error && error.unauthorized) {
+      expireSession(error.message);
+      return;
+    }
+    toast((error && error.message) || networkMessage(error), 'error');
   }
 
   /* ------------------------------------------------------------------------
      Authentication
      ------------------------------------------------------------------------ */
 
-  function hasSession() {
-    if (sessionMemory) return true;
-    try {
-      return window.sessionStorage.getItem(AUTH_KEY) === 'ok';
-    } catch (error) {
-      return false;
-    }
+  function applySession(payload) {
+    var session = payload || {};
+    state.session = {
+      username: session.username || '',
+      mustChange: Boolean(session.mustChange)
+    };
+    state.username = state.session.username;
+    state.mustChange = state.session.mustChange;
+    Array.prototype.forEach.call(document.querySelectorAll('.user-name'), function (node) {
+      node.textContent = state.username || 'Owner';
+    });
+    showNotice();
   }
 
-  function startSession() {
-    sessionMemory = true;
-    try {
-      window.sessionStorage.setItem(AUTH_KEY, 'ok');
-    } catch (error) {
-      // In-memory session still works when storage is blocked.
-    }
-  }
-
-  function endSession() {
-    sessionMemory = false;
-    try {
-      window.sessionStorage.removeItem(AUTH_KEY);
-    } catch (error) {
-      // Ignore.
-    }
-  }
-
-  function showApp() {
+  function enterApp() {
     loginView.hidden = true;
     adminApp.hidden = false;
     hydrateIcons(adminApp);
-    renderRoute();
+    pageContent.innerHTML = skeletonHtml();
+    setSaveState('saved');
+    return Store.ready().then(function (data) {
+      state.data = data;
+      state.snapshot = JSON.parse(JSON.stringify(data));
+    }).catch(function () {
+      state.data = Store.get();
+      state.snapshot = JSON.parse(JSON.stringify(state.data));
+    }).then(function () {
+      renderRoute();
+    });
+  }
+
+  function showApp() {
+    return enterApp();
   }
 
   function showLogin() {
@@ -450,14 +669,59 @@
     toggle.setAttribute('aria-pressed', 'false');
     toggle.setAttribute('aria-label', 'Show password');
     loginError.textContent = '';
+    setLoginBusy(false);
+  }
+
+  function expireSession(message) {
+    state.session = null;
+    state.username = '';
+    state.mustChange = false;
+    state.editing = false;
+    showLogin();
+    loginError.textContent = message || 'Your session expired. Sign in again.';
+  }
+
+  function hideBoot() {
+    if (!bootView || bootView.hidden) return;
+    bootView.classList.add('is-leaving');
+    window.setTimeout(function () { bootView.hidden = true; }, 200);
+  }
+
+  function boot() {
+    if (bootNote) bootNote.textContent = 'Checking your session…';
+    return apiJson('/api/session', { cache: 'no-store' }).then(function (result) {
+      if (result.response.ok && result.body && result.body.authenticated) {
+        applySession(result.body);
+        return enterApp();
+      }
+      showLogin();
+      if (result.response.status >= 500) {
+        loginError.textContent = 'The server is unavailable. Try again in a moment.';
+      }
+    }).catch(function (error) {
+      showLogin();
+      loginError.textContent = networkMessage(error);
+    }).then(function () {
+      hideBoot();
+      if (!loginView.hidden) document.getElementById('loginUsername').focus();
+    });
   }
 
   function handleSignOut() {
     closePopovers();
-    endSession();
-    location.hash = '';
-    showLogin();
-    toast('Signed out.', 'info');
+    return apiJson('/api/logout', { method: 'POST' }).catch(function () {
+      // The cookie expires on its own even if the request fails.
+    }).then(function () {
+      state.session = null;
+      state.username = '';
+      state.mustChange = false;
+      state.editing = false;
+      state.data = Store.get();
+      location.hash = '';
+      hideBoot();
+      showLogin();
+      toast('Signed out.', 'info');
+    });
   }
 
   /* ------------------------------------------------------------------------
@@ -469,25 +733,38 @@
   updateDraftBadge();
   pageContent.addEventListener('click', handleEditorActions);
 
-  if (Store.storageAvailable()) {
-    footerStorageNote.textContent = 'Changes are saved in this browser.';
-  } else {
-    footerStorageNote.textContent = 'Browser storage is blocked — changes last only for this session.';
-  }
-
   loginForm.addEventListener('submit', function (event) {
     event.preventDefault();
     var username = document.getElementById('loginUsername').value.trim();
     var password = document.getElementById('loginPassword').value;
-    if (username === AUTH_USER && password === AUTH_PASSWORD) {
-      loginError.textContent = '';
-      startSession();
-      showApp();
+    var remember = document.getElementById('loginRemember').checked;
+    if (!username || !password) {
+      loginError.textContent = 'Enter your username and password.';
       return;
     }
-    loginError.textContent = 'That username or password is not correct.';
-    document.getElementById('loginPassword').focus();
-    document.getElementById('loginPassword').select();
+    loginError.textContent = '';
+    setLoginBusy(true);
+    apiJson('/api/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username: username, password: password, remember: remember })
+    }, 20000).then(function (result) {
+      if (!result.response.ok) {
+        loginError.textContent = result.body.error || 'That username or password is not correct.';
+        var passwordInput = document.getElementById('loginPassword');
+        passwordInput.focus();
+        passwordInput.select();
+        return;
+      }
+      applySession(result.body);
+      return enterApp().then(function () {
+        toast(remember ? 'Signed in. This device stays signed in for 30 days.' : 'Signed in.', 'info');
+      });
+    }).catch(function (error) {
+      loginError.textContent = networkMessage(error);
+    }).then(function () {
+      setLoginBusy(false);
+    });
   });
 
   document.getElementById('togglePassword').addEventListener('click', function () {
@@ -537,17 +814,26 @@
       closePopovers();
       confirmAction({
         title: 'Reset sample content',
-        subtitle: 'This replaces every edit in this browser.',
-        message: 'Restore the original portfolio content, resume, contact details and social links? Your current changes will be lost.',
+        subtitle: 'This replaces the published content for everyone.',
+        message: 'Restore the original portfolio content, resume, contact details and social links? Your current published content will be replaced.',
         confirmLabel: 'Reset content',
         danger: true
       }).then(function (confirmed) {
         if (!confirmed) return;
-        state.data = Store.reset();
-        state.editing = false;
-        renderRoute();
-        updateDraftBadge();
-        toast('Sample content restored.');
+        return Store.reset().then(function (result) {
+          if (!result || !result.ok) {
+            toast((result && result.error) || 'Could not reset the content.', 'error');
+            return;
+          }
+          state.data = result.data;
+          state.editing = false;
+          state.snapshot = JSON.parse(JSON.stringify(result.data));
+          renderRoute();
+          updateDraftBadge();
+          toast('Content reset to the sample portfolio.', 'info');
+        }).catch(function (error) {
+          toast(networkMessage(error), 'error');
+        });
       });
     }
   });
@@ -576,11 +862,14 @@
 
   var ROUTES = {
     overview: { label: 'Overview', render: renderOverview },
+    account: { label: 'Account', render: renderAccount },
     profile: { label: 'Profile & hero', render: renderProfile },
     portfolio: { label: 'Portfolio', render: renderPortfolio },
     resume: { label: 'Resume', render: renderResume },
     contact: { label: 'Contact details', render: renderContact },
-    social: { label: 'Social links', render: renderSocial }
+    social: { label: 'Social links', render: renderSocial },
+    media: { label: 'Media library', render: renderMedia },
+    history: { label: 'History', render: renderHistory }
   };
 
   function currentRoute() {
@@ -777,7 +1066,7 @@
     }).join('') : '<li class="attention-empty">' + icon('check') + '<span>Nothing needs your attention. Drafts, links, contact details and CV are all in order.</span></li>';
 
     var html = pageHead('Overview', 'Your portfolio content at a glance.', 
-      '<a class="btn btn-secondary" href="../index.html" target="_blank" rel="noopener">' + icon('external') + 'View site</a>' +
+      '<a class="btn btn-secondary" href="../index.html?fresh=1" target="_blank" rel="noopener">' + icon('external') + 'View site</a>' +
       '<button class="btn btn-primary" type="button" data-action="new-project">' + icon('plus') + 'New project</button>');
 
     html += '<section class="kpi-strip" aria-label="Portfolio summary">' +
@@ -809,11 +1098,11 @@
       '<div class="page-grid">' +
       ['index.html|Splash home', 'index-2.html|Home', 'about.html|About', 'portfolio.html|Portfolio', 'resume.html|Resume', 'contact-me.html|Contact'].map(function (entry) {
         var parts = entry.split('|');
-        return '<a class="page-row" href="../' + parts[0] + '" target="_blank" rel="noopener">' + icon('globe') + esc(parts[1]) +
+        return '<a class="page-row" href="../' + parts[0] + '?fresh=1" target="_blank" rel="noopener">' + icon('globe') + esc(parts[1]) +
           '<span class="page-open">' + icon('external') + '</span></a>';
       }).join('') + '</div></section></div>';
 
-    html += '<p class="local-note">' + icon('info') + '<span>Changes are saved in this browser and appear on the public pages opened from here. Visitor-wide publishing needs a backend, which is the next step.</span></p>';
+    html += '<p class="local-note">' + icon('info') + '<span>Changes publish to the live site as soon as you save. Pages opened from here load the newest version.</span></p>';
 
     pageContent.innerHTML = html;
     pageContent.onclick = handleOverviewClick;
@@ -902,7 +1191,7 @@
     var projects = filteredProjects(data);
 
     var html = pageHead('Portfolio', data.projects.length + ' projects · ' + published + ' published',
-      '<a class="btn btn-secondary" href="../portfolio.html" target="_blank" rel="noopener">' + icon('external') + 'View grid</a>' +
+      '<a class="btn btn-secondary" href="../portfolio.html?fresh=1" target="_blank" rel="noopener">' + icon('external') + 'View grid</a>' +
       '<button class="btn btn-primary" type="button" data-project-action="new">' + icon('plus') + 'New project</button>');
 
     html += '<div class="toolbar">' +
@@ -1102,7 +1391,7 @@
       '<button class="btn btn-secondary btn-sm" type="button" data-choose-cover>' + icon('upload') + 'Choose image</button>' +
       '<button class="btn btn-ghost btn-sm" type="button" data-clear-cover>Remove</button></div>' +
       '<div class="field"><label for="coverUrl">Image URL</label><input class="input" id="coverUrl" type="text" value="' + esc(project.cover) + '" placeholder="images/portfolio/01.jpeg" spellcheck="false"></div>' +
-      '<p class="field-help">Uploads are resized in the browser before saving.</p></div></div>' +
+      '<p class="field-help">Uploads are optimised and saved to the media library with a permanent /media/ URL.</p></div></div>' +
       '<input type="file" id="coverFile" accept="image/*" hidden></section>' +
 
       '<section class="modal-section"><p class="modal-section-title">Details</p><div class="form-grid">' +
@@ -1121,8 +1410,8 @@
       '<option value="published"' + (project.status === 'published' ? ' selected' : '') + '>Published</option>' +
       '<option value="draft"' + (project.status === 'draft' ? ' selected' : '') + '>Draft</option>' +
       '</select></div>' +
-      '<div class="field span-2"><label for="projectVideo">Video URL</label><input class="input" id="projectVideo" type="text" value="' + esc(project.videoUrl) + '" placeholder="video/MyLogoReview.html" spellcheck="false">' +
-      '<p class="field-help">Only used when the format is video. The lightbox opens this page.</p></div>' +
+      '<div class="field span-2"><label for="projectVideo">Video URL</label><input class="input" id="projectVideo" type="text" value="' + esc(project.videoUrl) + '" placeholder="https://youtu.be/… or video/MyLogoReview.html" spellcheck="false">' +
+      '<p class="field-help">Paste a YouTube or Vimeo link (unlisted is fine), or a page like video/MyLogoReview.html. The cover image acts as the poster.</p></div>' +
       '<div class="field span-2"><label for="projectDescription">Short description</label><textarea class="input" id="projectDescription" rows="3" placeholder="Optional note about the work">' + esc(project.description) + '</textarea></div>' +
       '</div></section>' +
 
@@ -1170,13 +1459,27 @@
     function addGalleryFiles(files) {
       var list = Array.prototype.slice.call(files || []);
       if (!list.length) return;
-      var remaining = list.length;
-      list.forEach(function (file) {
-        compressImage(file, function (dataUrl) {
-          if (dataUrl) project.gallery.push(dataUrl);
-          remaining -= 1;
-          if (remaining === 0) renderGallery();
+      galleryList.classList.add('is-uploading');
+      list.reduce(function (chain, file) {
+        return chain.then(function () {
+          return uploadImage(file).then(function (item) {
+            project.gallery.push('/' + item.key);
+            renderGallery();
+          }).catch(handleUploadError);
         });
+      }, Promise.resolve()).then(function () {
+        galleryList.classList.remove('is-uploading');
+        renderGallery();
+      });
+    }
+
+    function uploadCover(file) {
+      if (!file) return;
+      coverDrop.classList.add('is-uploading');
+      uploadImage(file).then(function (item) {
+        setCover('/' + item.key);
+      }).catch(handleUploadError).then(function () {
+        coverDrop.classList.remove('is-uploading');
       });
     }
 
@@ -1195,20 +1498,12 @@
       event.preventDefault();
       coverDrop.classList.remove('is-dragging');
       if (event.dataTransfer.files && event.dataTransfer.files[0]) {
-        compressImage(event.dataTransfer.files[0], function (dataUrl) {
-          if (dataUrl) setCover(dataUrl);
-          else toast('That file could not be read as an image.', 'error');
-        });
+        uploadCover(event.dataTransfer.files[0]);
       }
     });
 
     coverFile.addEventListener('change', function () {
-      if (this.files && this.files[0]) {
-        compressImage(this.files[0], function (dataUrl) {
-          if (dataUrl) setCover(dataUrl);
-          else toast('That file could not be read as an image.', 'error');
-        });
-      }
+      if (this.files && this.files[0]) uploadCover(this.files[0]);
       this.value = '';
     });
 
@@ -1401,19 +1696,19 @@
     if (event.target.id !== 'portraitFile') return;
     var file = event.target.files && event.target.files[0];
     if (!file) return;
-    compressImage(file, function (dataUrl) {
-      if (!dataUrl) {
-        toast('That file could not be read as an image.', 'error');
-        return;
-      }
-      saveData(function (data) { data.profile.portrait = dataUrl; }, { toast: 'Portrait updated.' });
-      var image = document.getElementById('portraitImage');
+    var image = document.getElementById('portraitImage');
+    if (image) image.classList.add('is-uploading');
+    uploadImage(file).then(function (item) {
+      var src = '/' + item.key;
+      saveData(function (data) { data.profile.portrait = src; }, { toast: 'Portrait updated.' });
       var url = document.getElementById('portraitUrl');
       if (image) {
-        image.src = dataUrl;
+        image.src = src;
         image.hidden = false;
       }
-      if (url) url.value = dataUrl;
+      if (url) url.value = src;
+    }).catch(handleUploadError).then(function () {
+      if (image) image.classList.remove('is-uploading');
     });
     event.target.value = '';
   });
@@ -1775,6 +2070,420 @@
   }
 
   /* ------------------------------------------------------------------------
+     Account
+     ------------------------------------------------------------------------ */
+
+  function renderAccount() {
+    var html = pageHead('Account', 'The username and password that protect this admin.');
+
+    html += '<div class="account-grid"><section class="panel">' +
+      '<div class="panel-head"><div><h2 class="panel-title">Sign-in details</h2>' +
+      '<p class="panel-sub">You sign in with one username and one password. Changes apply immediately.</p></div></div>' +
+      '<form class="panel-form form-stack" id="accountForm" novalidate>' +
+      '<div class="field"><label for="accountUsername">Username</label>' +
+      '<input class="input" id="accountUsername" name="username" type="text" value="' + esc(state.username) + '" autocomplete="username" spellcheck="false" required>' +
+      '<p class="field-help">At least 3 characters. Letters, numbers, dots, dashes and underscores.</p></div>' +
+      '<div class="field"><label for="accountCurrent">Current password</label>' +
+      '<input class="input" id="accountCurrent" name="currentPassword" type="password" autocomplete="current-password" required>' +
+      '<p class="field-help">Required before anything changes.</p></div>' +
+      '<div class="field"><label for="accountNew">New password</label>' +
+      '<input class="input" id="accountNew" name="newPassword" type="password" autocomplete="new-password">' +
+      '<p class="field-help">Leave blank to keep the current password. At least 10 characters and not the default.</p></div>' +
+      '<div class="field"><label for="accountConfirm">Repeat new password</label>' +
+      '<input class="input" id="accountConfirm" name="confirmPassword" type="password" autocomplete="new-password"></div>' +
+      '<p class="form-error" id="accountError" role="alert"></p>' +
+      '<div class="form-actions"><button class="btn btn-primary" type="submit">Save account</button></div>' +
+      '</form></section>' +
+      '<aside class="rail">' +
+      '<section class="panel"><div class="panel-head"><div><h2 class="panel-title">Session</h2></div></div>' +
+      '<div class="panel-body"><dl class="detail-list">' +
+      '<div><dt>Signed in as</dt><dd>' + esc(state.username || '—') + '</dd></div>' +
+      '<div><dt>Session length</dt><dd>7 days, or 30 days with “Keep me signed in”.</dd></div>' +
+      '<div><dt>Stored on</dt><dd>A secure HttpOnly cookie on this device.</dd></div>' +
+      '</dl><button class="btn btn-secondary btn-block" type="button" data-account-action="sign-out">' + icon('logout') + 'Sign out</button></div></section>' +
+      '<section class="panel"><div class="panel-head"><div><h2 class="panel-title">Good to know</h2></div></div>' +
+      '<div class="panel-body"><p class="panel-sub">Changing your password signs out other devices the next time they try to save. This device stays signed in.</p></div></section>' +
+      '</aside></div>';
+
+    pageContent.innerHTML = html;
+    pageContent.onclick = handleAccountClick;
+    var form = document.getElementById('accountForm');
+    if (form) form.addEventListener('submit', submitAccount);
+  }
+
+  function handleAccountClick(event) {
+    if (event.target.closest('[data-account-action="sign-out"]')) handleSignOut();
+  }
+
+  function submitAccount(event) {
+    event.preventDefault();
+    var form = event.currentTarget;
+    var username = form.querySelector('#accountUsername').value.trim();
+    var current = form.querySelector('#accountCurrent').value;
+    var next = form.querySelector('#accountNew').value;
+    var confirm = form.querySelector('#accountConfirm').value;
+    var error = form.querySelector('#accountError');
+    var button = form.querySelector('button[type="submit"]');
+
+    error.textContent = '';
+    if (!current) {
+      error.textContent = 'Enter your current password.';
+      form.querySelector('#accountCurrent').focus();
+      return;
+    }
+    if (next && next.length < 10) {
+      error.textContent = 'Use at least 10 characters for the new password.';
+      form.querySelector('#accountNew').focus();
+      return;
+    }
+    if (next && next !== confirm) {
+      error.textContent = 'The new passwords do not match.';
+      form.querySelector('#accountConfirm').focus();
+      return;
+    }
+
+    var payload = { currentPassword: current };
+    if (username && username !== state.username) payload.username = username;
+    if (next) payload.newPassword = next;
+    if (!payload.username && !payload.newPassword) {
+      error.textContent = 'Change your username or password to save.';
+      return;
+    }
+
+    button.disabled = true;
+    button.textContent = 'Saving…';
+
+    apiJson('/api/account', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload)
+    }, 20000).then(function (result) {
+      if (result.response.status === 401) {
+        expireSession(result.body.error || 'Your session expired. Sign in again.');
+        return;
+      }
+      if (!result.response.ok) {
+        error.textContent = result.body.error || 'Could not update your account.';
+        return;
+      }
+      applySession({ username: result.body.username, mustChange: false });
+      toast('Account updated. Use the new details next time you sign in.', 'info');
+      renderRoute();
+    }).catch(function (errorObject) {
+      error.textContent = networkMessage(errorObject);
+    }).then(function () {
+      button.disabled = false;
+      button.textContent = 'Save account';
+    });
+  }
+
+  /* ------------------------------------------------------------------------
+     Media library
+     ------------------------------------------------------------------------ */
+
+  var mediaState = { items: null };
+
+  function mediaSkeleton() {
+    var cards = '';
+    for (var index = 0; index < 6; index += 1) {
+      cards += '<div class="media-card is-loading"><span class="skeleton media-skeleton"></span></div>';
+    }
+    return cards;
+  }
+
+  function renderMedia() {
+    var html = pageHead('Media library', 'Images uploaded here get a permanent address you can reuse anywhere on the site.',
+      '<button class="btn btn-primary" type="button" data-media-action="upload">' + icon('upload') + 'Upload images</button>');
+
+    html += '<div class="media-toolbar"><span class="count-label" id="mediaCount">Loading…</span>' +
+      '<span class="toolbar-spacer"></span>' +
+      '<input class="input" id="mediaSearch" type="search" placeholder="Filter by filename" aria-label="Filter images" autocomplete="off"></div>';
+
+    html += '<section class="panel"><div class="media-grid" id="mediaGrid">' + mediaSkeleton() + '</div></section>';
+    html += '<input type="file" id="mediaFiles" accept="image/*" multiple hidden>';
+    html += '<p class="local-note">' + icon('info') + '<span>New uploads live in Netlify Blobs and are served from /media/. Images already in the site folder keep their old paths and still work.</span></p>';
+
+    pageContent.innerHTML = html;
+    pageContent.onclick = handleMediaClick;
+
+    var search = document.getElementById('mediaSearch');
+    if (search) {
+      search.addEventListener('input', function () { renderMediaGrid(this.value.trim()); });
+    }
+    var picker = document.getElementById('mediaFiles');
+    if (picker) {
+      picker.addEventListener('change', function () {
+        uploadMediaFiles(this.files);
+        this.value = '';
+      });
+    }
+    loadMedia();
+  }
+
+  function loadMedia() {
+    return apiJson('/api/media').then(function (result) {
+      if (result.response.status === 401) {
+        expireSession();
+        return;
+      }
+      if (!result.response.ok) throw new Error(result.body.error || 'Could not load the media library.');
+      mediaState.items = result.body.items || [];
+    }).catch(function (error) {
+      mediaState.items = [];
+      toast(networkMessage(error), 'error');
+    }).then(function () {
+      if (state.route !== 'media') return;
+      var search = document.getElementById('mediaSearch');
+      renderMediaGrid(search ? search.value.trim() : '');
+    });
+  }
+
+  function renderMediaGrid(query) {
+    var grid = document.getElementById('mediaGrid');
+    if (!grid) return;
+    var all = mediaState.items || [];
+    var needle = String(query || '').toLowerCase();
+    var items = all.filter(function (item) {
+      return !needle || String(item.filename || '').toLowerCase().indexOf(needle) !== -1;
+    });
+
+    var count = document.getElementById('mediaCount');
+    if (count) count.textContent = all.length + (all.length === 1 ? ' image' : ' images');
+
+    if (!items.length) {
+      grid.innerHTML = '<div class="empty-state">' + icon('image') +
+        '<strong>' + (all.length ? 'No images match that filter' : 'No images yet') + '</strong>' +
+        '<p>' + (all.length
+          ? 'Try a different filename.'
+          : 'Upload a logo, portrait or project image and it gets a permanent /media/ address.') + '</p>' +
+        '<button class="btn btn-primary btn-sm" type="button" data-media-action="upload">' + icon('upload') + 'Upload images</button></div>';
+      return;
+    }
+
+    grid.innerHTML = items.map(function (item) {
+      return '<figure class="media-card">' +
+        '<div class="media-thumb"><img src="' + esc('/' + item.thumbKey) + '" alt="' + esc(item.alt || item.filename) + '" loading="lazy"></div>' +
+        '<figcaption><strong title="' + esc(item.filename) + '">' + esc(item.filename) + '</strong>' +
+        '<small>' + (item.width && item.height ? item.width + '×' + item.height + ' · ' : '') +
+        formatBytes(item.size) + ' · ' + esc(relativeSaved(item.createdAt)) + '</small>' +
+        '<div class="media-actions">' +
+        '<button class="btn btn-ghost btn-sm" type="button" data-media-action="copy" data-media-id="' + esc(item.id) + '">' + icon('copy') + 'Copy URL</button>' +
+        '<button class="btn btn-ghost btn-sm danger" type="button" data-media-action="delete" data-media-id="' + esc(item.id) + '">' + icon('trash') + 'Delete</button>' +
+        '</div></figcaption></figure>';
+    }).join('');
+  }
+
+  function handleMediaClick(event) {
+    var button = event.target.closest('[data-media-action]');
+    if (!button) return;
+    var action = button.getAttribute('data-media-action');
+
+    if (action === 'upload') {
+      var picker = document.getElementById('mediaFiles');
+      if (picker) picker.click();
+      return;
+    }
+    var item = (mediaState.items || []).find(function (candidate) {
+      return candidate.id === button.getAttribute('data-media-id');
+    });
+    if (!item) return;
+
+    if (action === 'copy') {
+      var absolute = window.location.origin + '/' + item.key;
+      copyText(absolute).then(function (copied) {
+        toast(copied ? 'Image URL copied.' : absolute, 'info');
+      });
+      return;
+    }
+    if (action === 'delete') {
+      confirmAction({
+        title: 'Delete image',
+        subtitle: 'This cannot be undone.',
+        message: 'Delete <strong>' + esc(item.filename) + '</strong>? Images still used in the site content cannot be deleted.',
+        confirmLabel: 'Delete image',
+        danger: true
+      }).then(function (confirmed) {
+        if (!confirmed) return;
+        apiJson('/api/media/' + encodeURIComponent(item.id), { method: 'DELETE' }, 20000).then(function (result) {
+          if (result.response.status === 401) {
+            expireSession();
+            return;
+          }
+          if (result.response.status === 409) {
+            toast(result.body.error || 'This image is still used in the site content.', 'error');
+            return;
+          }
+          if (!result.response.ok) {
+            toast(result.body.error || 'Could not delete that image.', 'error');
+            return;
+          }
+          mediaState.items = (mediaState.items || []).filter(function (candidate) { return candidate.id !== item.id; });
+          var search = document.getElementById('mediaSearch');
+          renderMediaGrid(search ? search.value.trim() : '');
+          toast('Image deleted.', 'info');
+        }).catch(function (error) {
+          toast(networkMessage(error), 'error');
+        });
+      });
+    }
+  }
+
+  function uploadMediaFiles(files) {
+    var list = Array.prototype.slice.call(files || []);
+    if (!list.length) return;
+    var grid = document.getElementById('mediaGrid');
+    if (grid) grid.classList.add('is-uploading');
+    var uploaded = 0;
+
+    list.reduce(function (chain, file) {
+      return chain.then(function () {
+        return uploadImage(file).then(function (item) {
+          uploaded += 1;
+          mediaState.items = [item].concat((mediaState.items || []).filter(function (existing) {
+            return existing.id !== item.id;
+          }));
+          var search = document.getElementById('mediaSearch');
+          renderMediaGrid(search ? search.value.trim() : '');
+        }).catch(handleUploadError);
+      });
+    }, Promise.resolve()).then(function () {
+      var node = document.getElementById('mediaGrid');
+      if (node) node.classList.remove('is-uploading');
+      if (uploaded) {
+        toast(uploaded === 1 ? 'Image uploaded.' : uploaded + ' images uploaded.', 'info');
+      }
+    });
+  }
+
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text).then(function () { return true; }, function () { return false; });
+    }
+    var field = document.createElement('textarea');
+    field.value = text;
+    field.setAttribute('readonly', '');
+    field.style.position = 'fixed';
+    field.style.opacity = '0';
+    document.body.appendChild(field);
+    field.select();
+    var copied = false;
+    try { copied = document.execCommand('copy'); } catch (error) { copied = false; }
+    field.remove();
+    return Promise.resolve(copied);
+  }
+
+  /* ------------------------------------------------------------------------
+     History
+     ------------------------------------------------------------------------ */
+
+  var historyState = { items: null };
+
+  function renderHistory() {
+    var html = pageHead('History', 'Every save keeps a copy. Restore an earlier version if something goes wrong.',
+      '<button class="btn btn-secondary" type="button" data-history-action="refresh">' + icon('rotate') + 'Refresh</button>');
+
+    html += '<section class="panel"><div class="panel-head"><div><h2 class="panel-title">Saved versions</h2>' +
+      '<p class="panel-sub">The 20 most recent versions are kept. The live version is marked.</p></div></div>' +
+      '<div class="table-wrap"><table class="data-table"><thead><tr><th>Version</th><th>Saved</th><th class="col-actions"><span class="sr-only">Actions</span></th></tr></thead>' +
+      '<tbody id="historyBody">' + historyRows() + '</tbody></table></div></section>';
+
+    pageContent.innerHTML = html;
+    pageContent.onclick = handleHistoryClick;
+    loadHistory();
+  }
+
+  function historyRows() {
+    if (!historyState.items) {
+      return '<tr><td colspan="3"><div class="empty-state">' + icon('rotate') + '<strong>Loading versions…</strong><p>Reading the save history.</p></div></td></tr>';
+    }
+    if (!historyState.items.length) {
+      return '<tr><td colspan="3"><div class="empty-state">' + icon('rotate') + '<strong>No saved versions yet</strong><p>Save the site once and the history starts here.</p></div></td></tr>';
+    }
+    var current = Store.serverVersion();
+    return historyState.items.map(function (item) {
+      var isCurrent = Number(item.version) === Number(current);
+      return '<tr><td><strong>Version ' + esc(item.version) + '</strong>' + (isCurrent ? ' <span class="pill pill-published">Live</span>' : '') + '</td>' +
+        '<td class="muted-cell">' + esc(relativeSaved(item.createdAt)) + ' · ' + esc(formatDate(item.createdAt)) + '</td>' +
+        '<td class="col-actions">' +
+        '<button class="btn btn-secondary btn-sm" type="button" data-history-action="restore" data-revision-id="' + esc(item.id) + '" data-revision-version="' + esc(item.version) + '"' +
+        (isCurrent ? ' disabled' : '') + '>' + icon('rotate') + 'Restore</button></td></tr>';
+    }).join('');
+  }
+
+  function loadHistory() {
+    return apiJson('/api/revisions').then(function (result) {
+      if (result.response.status === 401) {
+        expireSession();
+        return;
+      }
+      if (!result.response.ok) throw new Error(result.body.error || 'Could not load the history.');
+      historyState.items = result.body.items || [];
+    }).catch(function (error) {
+      historyState.items = [];
+      toast(networkMessage(error), 'error');
+    }).then(function () {
+      var body = document.getElementById('historyBody');
+      if (!body) return;
+      body.innerHTML = historyRows();
+      hydrateIcons(body);
+    });
+  }
+
+  function handleHistoryClick(event) {
+    var button = event.target.closest('[data-history-action]');
+    if (!button) return;
+    var action = button.getAttribute('data-history-action');
+    if (action === 'refresh') {
+      historyState.items = null;
+      var body = document.getElementById('historyBody');
+      if (body) body.innerHTML = historyRows();
+      loadHistory();
+      return;
+    }
+    if (action === 'restore') {
+      restoreRevision(button.getAttribute('data-revision-id'), button.getAttribute('data-revision-version'));
+    }
+  }
+
+  function restoreRevision(id, version) {
+    confirmAction({
+      title: 'Restore version ' + version,
+      subtitle: 'This becomes the live content.',
+      message: 'Replace the published content with <strong>version ' + esc(version) + '</strong>? The current version is still kept in this history.',
+      confirmLabel: 'Restore version',
+      danger: true
+    }).then(function (confirmed) {
+      if (!confirmed) return;
+      return apiJson('/api/revisions/' + encodeURIComponent(id) + '/restore', { method: 'POST' }, 20000).then(function (result) {
+        if (result.response.status === 401) {
+          expireSession();
+          return;
+        }
+        if (result.response.status === 404) {
+          toast('That version is no longer available.', 'error');
+          return loadHistory();
+        }
+        if (result.response.status === 409) {
+          toast(result.body.error || 'Content changed elsewhere. Reload before restoring.', 'error');
+          return loadHistory();
+        }
+        if (!result.response.ok) {
+          toast(result.body.error || 'Could not restore that version.', 'error');
+          return;
+        }
+        return Store.ready().then(function (data) {
+          state.data = data;
+          state.snapshot = JSON.parse(JSON.stringify(data));
+          renderRoute();
+          toast('Restored version ' + version + '.', 'info');
+        });
+      });
+    }).catch(function (error) {
+      toast(networkMessage(error), 'error');
+    });
+  }
+
+  /* ------------------------------------------------------------------------
      Start
      ------------------------------------------------------------------------ */
 
@@ -1796,10 +2505,5 @@
     toast('Content was updated in another tab.', 'info');
   });
 
-  if (hasSession()) {
-    showApp();
-  } else {
-    showLogin();
-    document.getElementById('loginUsername').focus();
-  }
+  boot();
 })();

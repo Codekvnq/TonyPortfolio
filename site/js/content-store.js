@@ -14,6 +14,8 @@
   'use strict';
 
   var KEY = 'anthonyPortfolio.content.v1';
+  var CACHE_KEY = 'anthonyPortfolio.content.v2';
+  var API = '/api/content';
   var VERSION = 1;
 
   function daysAgo(days) {
@@ -386,49 +388,153 @@
     }
   }
 
-  function get() {
-    if (!storageAvailable()) return clone(defaults);
+  function readCache() {
     try {
-      var raw = window.localStorage.getItem(KEY);
-      if (!raw) return clone(defaults);
+      var raw = window.localStorage.getItem(CACHE_KEY);
+      if (!raw) return null;
       return normalize(JSON.parse(raw));
     } catch (error) {
-      return clone(defaults);
+      return null;
     }
+  }
+
+  function writeCache(data) {
+    try {
+      window.localStorage.setItem(CACHE_KEY, JSON.stringify(data));
+    } catch (error) {
+      // The network copy is still the source of truth.
+    }
+  }
+
+  var current = readCache() || clone(defaults);
+  var currentVersion = 0;
+  var currentUpdatedAt = current.meta && current.meta.updatedAt;
+  var refreshPromise = null;
+  var writeChain = Promise.resolve();
+
+  function get() {
+    return clone(current);
   }
 
   function announce(data) {
-    window.dispatchEvent(new CustomEvent('portfolio:content-changed', { detail: data }));
+    var detail = clone(data);
+    try {
+      window.dispatchEvent(new CustomEvent('portfolio:content-changed', { detail: detail }));
+    } catch (error) {
+      // Old browsers without CustomEvent still hydrate on the next page load.
+    }
+  }
+
+  function apiFetch(url, options, timeout) {
+    if (!window.fetch) return Promise.reject(new Error('This browser cannot reach the server.'));
+    var control = window.AbortController ? new window.AbortController() : null;
+    var config = Object.assign({ credentials: 'same-origin' }, options || {});
+    if (control) config.signal = control.signal;
+    var timer = control
+      ? window.setTimeout(function () { control.abort(); }, timeout || 12000)
+      : null;
+    return window.fetch(url, config).then(function (response) {
+      if (timer) window.clearTimeout(timer);
+      return response;
+    }, function (error) {
+      if (timer) window.clearTimeout(timer);
+      throw error;
+    });
+  }
+
+  function refresh(options) {
+    var opts = options || {};
+    if (!window.fetch) return Promise.resolve(get());
+    if (refreshPromise && !opts.force) return refreshPromise;
+
+    var fresh = opts.fresh !== undefined
+      ? opts.fresh
+      : /(?:^|[?&])fresh(?:=|&|$)/.test(window.location.search || '');
+
+    refreshPromise = apiFetch(API + (fresh ? '?fresh=1' : ''), {
+      headers: { accept: 'application/json' }
+    }).then(function (response) {
+      if (!response.ok) throw new Error('Content request failed');
+      return response.json();
+    }).then(function (payload) {
+      if (payload && payload.content) {
+        current = normalize(payload.content);
+        currentVersion = Number(payload.version) || 0;
+        currentUpdatedAt = payload.updatedAt || current.meta.updatedAt;
+      } else {
+        current = clone(defaults);
+        currentVersion = 0;
+        currentUpdatedAt = null;
+      }
+      writeCache(current);
+      announce(current);
+      return get();
+    }).catch(function () {
+      return get();
+    }).then(function (data) {
+      refreshPromise = null;
+      return data;
+    });
+
+    return refreshPromise;
+  }
+
+  function doSave(data) {
+    var next = normalize(data);
+    next.meta = Object.assign({}, next.meta, { updatedAt: new Date().toISOString() });
+
+    return apiFetch(API, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify({ content: next, baseVersion: currentVersion })
+    }, 20000).then(function (response) {
+      return response.json().catch(function () { return {}; }).then(function (payload) {
+        if (response.status === 401) {
+          return { ok: false, unauthorized: true, error: 'Your session expired. Sign in again.' };
+        }
+        if (response.status === 409) {
+          return {
+            ok: false,
+            conflict: true,
+            currentVersion: payload.currentVersion,
+            error: payload.error || 'Content changed elsewhere. Reload before saving.'
+          };
+        }
+        if (!response.ok) {
+          return { ok: false, error: payload.error || 'Could not save your changes.' };
+        }
+        current = next;
+        currentVersion = Number(payload.version) || currentVersion + 1;
+        currentUpdatedAt = payload.updatedAt || next.meta.updatedAt;
+        current.meta.updatedAt = currentUpdatedAt;
+        writeCache(current);
+        announce(current);
+        return { ok: true, data: clone(current), version: currentVersion };
+      });
+    }).catch(function (error) {
+      return {
+        ok: false,
+        error: error && error.name === 'AbortError'
+          ? 'The save timed out. Check your connection and try again.'
+          : 'Could not reach the server. Check your connection and try again.'
+      };
+    });
   }
 
   function save(data) {
-    var next = normalize(data);
-    next.version = VERSION;
-    next.meta = Object.assign({}, next.meta, { updatedAt: new Date().toISOString() });
-    try {
-      window.localStorage.setItem(KEY, JSON.stringify(next));
-    } catch (error) {
-      return { ok: false, error: error, data: next };
-    }
-    announce(next);
-    return { ok: true, data: next };
+    var run = function () { return doSave(data); };
+    writeChain = writeChain.then(run, run);
+    return writeChain;
   }
 
   function update(mutator) {
-    var data = get();
-    mutator(data);
-    return save(data);
+    var next = get();
+    mutator(next);
+    return save(next);
   }
 
   function reset() {
-    try {
-      window.localStorage.removeItem(KEY);
-    } catch (error) {
-      // Storage can be blocked in an embedded preview.
-    }
-    var fresh = clone(defaults);
-    announce(fresh);
-    return fresh;
+    return save(clone(defaults));
   }
 
   function subscribe(callback) {
@@ -437,7 +543,7 @@
     };
     window.addEventListener('portfolio:content-changed', handler);
     window.addEventListener('storage', function (event) {
-      if (event.key === KEY) callback(get());
+      if (event.key === CACHE_KEY) callback(get());
     });
     return function () {
       window.removeEventListener('portfolio:content-changed', handler);
@@ -445,14 +551,18 @@
   }
 
   window.PortfolioContent = {
-    key: KEY,
+    key: CACHE_KEY,
     version: VERSION,
     defaults: function () { return clone(defaults); },
     get: get,
+    refresh: refresh,
+    ready: function () { return refresh({ force: true, fresh: true }); },
     save: save,
     update: update,
     reset: reset,
     subscribe: subscribe,
-    storageAvailable: storageAvailable
+    storageAvailable: storageAvailable,
+    serverVersion: function () { return currentVersion; },
+    updatedAt: function () { return currentUpdatedAt; }
   };
 })();

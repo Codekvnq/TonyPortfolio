@@ -79,6 +79,20 @@
   /* Portfolio grid                                                      */
   /* ------------------------------------------------------------------ */
 
+  function videoEmbedUrl(url) {
+    var value = String(url || '').trim();
+    if (!value) return '';
+    if (/\.html?($|[?#])/i.test(value)) return value;
+
+    var youtube = value.match(/(?:youtube(?:-nocookie)?\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|live\/)|youtu\.be\/)([A-Za-z0-9_-]{6,})/i);
+    if (youtube) return 'https://www.youtube-nocookie.com/embed/' + youtube[1] + '?rel=0';
+
+    var vimeo = value.match(/vimeo\.com\/(?:video\/)?(\d+)/i);
+    if (vimeo) return 'https://player.vimeo.com/video/' + vimeo[1];
+
+    return value;
+  }
+
   function portfolioItem(project) {
     var category = ['illustration', 'media', 'video'].indexOf(project.category) !== -1 ? project.category : 'media';
     var type = project.type || 'image';
@@ -86,7 +100,7 @@
     var anchors = '';
 
     if (type === 'video' && project.videoUrl) {
-      anchors = '<a href="' + esc(project.videoUrl) + '" data-title="' + esc(title) + '" class="lightbox mfp-iframe"></a>';
+      anchors = '<a href="' + esc(videoEmbedUrl(project.videoUrl)) + '" data-title="' + esc(title) + '" class="lightbox mfp-iframe"></a>';
     } else {
       var gallery = (project.gallery && project.gallery.length ? project.gallery : [project.cover]).filter(Boolean);
       anchors = gallery.map(function (src) {
@@ -230,4 +244,5 @@
 
   renderAll();
   Store.subscribe(renderAll);
+  if (typeof Store.refresh === 'function') Store.refresh();
 })();

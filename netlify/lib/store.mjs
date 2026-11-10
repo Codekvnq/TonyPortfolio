@@ -1,4 +1,7 @@
-const STORE_NAME = "portfolio";
+// Preview and local builds write to their own Blobs store so a deploy preview
+// can never change what the production site shows.
+const STORE_NAME =
+  process.env.CONTEXT === "production" ? "portfolio" : "portfolio-preview";
 let cachedStore;
 
 /**

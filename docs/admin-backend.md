@@ -59,7 +59,14 @@ Admin URL: `https://<site>.netlify.app/admin/`
 Default credentials are `admin` / `admin123!` until the owner changes them in
 Account. A `mustChange` flag drives the dashboard warning.
 
-## Blobs keys (`portfolio` store)
+Sessions last 7 days. Signing in with “Keep me signed in” issues a 30-day
+cookie and a matching 30-day token.
+
+Preview and local builds write to the `portfolio-preview` Blobs store, so a
+deploy preview can never change what the production site shows. Production
+sets `CONTEXT=production` and uses the `portfolio` store.
+
+## Blobs keys (`portfolio` store or `portfolio-preview`)
 
 - `content.json` — live site content
 - `revisions/<id>.json` — last 20 saves

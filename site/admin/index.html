@@ -12,7 +12,16 @@
   <link rel="stylesheet" href="../css/admin.css">
 </head>
 <body>
-  <section class="login-view" id="loginView">
+  <section class="boot-view" id="bootView" aria-live="polite">
+    <div class="boot-card">
+      <span class="brand-mark" aria-hidden="true">A</span>
+      <p class="boot-title">Portfolio admin</p>
+      <div class="boot-lines" aria-hidden="true"><span></span><span></span><span></span></div>
+      <p class="boot-note" id="bootNote">Checking your session…</p>
+    </div>
+  </section>
+
+  <section class="login-view" id="loginView" hidden>
     <main class="login-card">
       <div class="login-brand">
         <span class="brand-mark" aria-hidden="true">A</span>
@@ -47,6 +56,11 @@
           </div>
 
           <p class="form-error" id="loginError" role="alert"></p>
+
+          <label class="remember-field">
+            <input id="loginRemember" name="remember" type="checkbox">
+            <span>Keep me signed in for 30 days</span>
+          </label>
 
           <button class="btn btn-primary btn-block" type="submit">Sign in</button>
         </form>
@@ -86,6 +100,10 @@
           <span class="nav-icon" data-icon="dashboard" aria-hidden="true"></span>
           <span>Overview</span>
         </a>
+        <a class="nav-item" href="#/account" data-route="account">
+          <span class="nav-icon" data-icon="lock" aria-hidden="true"></span>
+          <span>Account</span>
+        </a>
 
         <p class="nav-label">Content</p>
         <a class="nav-item" href="#/profile" data-route="profile">
@@ -109,10 +127,18 @@
           <span class="nav-icon" data-icon="link" aria-hidden="true"></span>
           <span>Social links</span>
         </a>
+        <a class="nav-item" href="#/media" data-route="media">
+          <span class="nav-icon" data-icon="image" aria-hidden="true"></span>
+          <span>Media library</span>
+        </a>
+        <a class="nav-item" href="#/history" data-route="history">
+          <span class="nav-icon" data-icon="rotate" aria-hidden="true"></span>
+          <span>History</span>
+        </a>
       </nav>
 
       <div class="sidebar-foot">
-        <a class="sidebar-link" href="../portfolio.html" target="_blank" rel="noopener">
+        <a class="sidebar-link" href="../portfolio.html?fresh=1" target="_blank" rel="noopener">
           <span data-icon="external" aria-hidden="true"></span>
           <span>View live site</span>
         </a>
@@ -151,7 +177,7 @@
         <div class="topbar-actions">
           <span class="save-indicator" id="saveIndicator"><span class="save-dot" aria-hidden="true"></span><span id="saveText">Saved</span></span>
 
-          <a class="icon-btn" href="../index.html" target="_blank" rel="noopener" title="Open live site" aria-label="Open live site">
+          <a class="icon-btn" href="../index.html?fresh=1" target="_blank" rel="noopener" title="Open live site" aria-label="Open live site">
             <span data-icon="external" aria-hidden="true"></span>
           </a>
 
@@ -177,8 +203,14 @@
                   <small>Owner · Full access</small>
                 </span>
               </div>
-              <a class="menu-item" href="../index.html" target="_blank" rel="noopener">
+              <a class="menu-item" href="../index.html?fresh=1" target="_blank" rel="noopener">
                 <span data-icon="external" aria-hidden="true"></span>Open live site
+              </a>
+              <a class="menu-item" href="#/account">
+                <span data-icon="lock" aria-hidden="true"></span>Account &amp; password
+              </a>
+              <a class="menu-item" href="#/history">
+                <span data-icon="rotate" aria-hidden="true"></span>Version history
               </a>
               <button class="menu-item" type="button" data-action="reset-content">
                 <span data-icon="rotate" aria-hidden="true"></span>Reset sample content
@@ -191,11 +223,13 @@
         </div>
       </header>
 
+      <div class="admin-notice" id="adminNotice" hidden></div>
+
       <main class="page-content" id="pageContent" tabindex="-1"></main>
 
       <footer class="admin-footer">
         <span>Portfolio admin</span>
-        <span id="footerStorageNote">Changes are saved in this browser.</span>
+        <span id="footerStorageNote">Changes publish to the live site.</span>
       </footer>
     </div>
   </div>
