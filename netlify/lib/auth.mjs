@@ -26,6 +26,10 @@ export function makeSessionSecret() {
   return randomBytes(32).toString("base64url");
 }
 
+export function makeCsrfToken() {
+  return randomBytes(32).toString("base64url");
+}
+
 export async function hashPassword(
   password,
   salt,

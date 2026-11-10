@@ -9,6 +9,40 @@ import {
   memoryStore,
 } from "./helpers.mjs";
 
+async function loginWithCsrf(handler, username = "admin", password = "admin123!") {
+  const response = await login(handler, username, password);
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  const cookie = cookieValue(response);
+  return { cookie, csrfToken: body.csrfToken };
+}
+
+async function callWithCsrf(
+  handler,
+  method,
+  path,
+  { body, cookie, csrfToken, origin, headers: extra } = {},
+) {
+  const headers = new Headers({
+    "x-forwarded-host": "portfolio.test",
+    "x-forwarded-proto": "https",
+    "content-type": "application/json",
+  });
+  if (origin) headers.set("origin", origin);
+  if (cookie) headers.set("cookie", `admin_session=${cookie}`);
+  if (csrfToken) headers.set("x-csrf-token", csrfToken);
+  if (extra) {
+    for (const [name, value] of Object.entries(extra)) headers.set(name, value);
+  }
+  return handler(
+    new Request(`https://portfolio.test${path}`, {
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+    }),
+  );
+}
+
 test("default credentials log in and start a session", async () => {
   const handler = makeHandler(memoryStore());
 
@@ -24,11 +58,11 @@ test("default credentials log in and start a session", async () => {
 
   const session = await call(handler, "GET", "/api/session", { cookie });
   assert.equal(session.status, 200);
-  assert.deepEqual(await session.json(), {
-    authenticated: true,
-    username: "admin",
-    mustChange: true,
-  });
+  const sessionBody = await session.json();
+  assert.equal(sessionBody.authenticated, true);
+  assert.equal(sessionBody.username, "admin");
+  assert.equal(sessionBody.mustChange, true);
+  assert.ok(sessionBody.csrfToken);
 });
 
 test("remember me extends the session to 30 days", async () => {
@@ -74,11 +108,11 @@ test("five failures trigger a temporary lockout", async () => {
 
 test("account changes bump the version and invalidate old sessions", async () => {
   const handler = makeHandler(memoryStore());
-  const oldResponse = await login(handler);
-  const oldCookie = cookieValue(oldResponse);
+  const { cookie, csrfToken } = await loginWithCsrf(handler);
 
-  const change = await call(handler, "PUT", "/api/account", {
-    cookie: oldCookie,
+  const change = await callWithCsrf(handler, "PUT", "/api/account", {
+    cookie,
+    csrfToken,
     body: {
       currentPassword: "admin123!",
       username: "tony",
@@ -88,18 +122,21 @@ test("account changes bump the version and invalidate old sessions", async () =>
   assert.equal(change.status, 200);
   const newCookie = cookieValue(change);
   assert.ok(newCookie);
-  assert.notEqual(newCookie, oldCookie);
+  assert.notEqual(newCookie, cookie);
   assert.equal((await change.json()).username, "tony");
 
-  const oldSession = await call(handler, "GET", "/api/session", { cookie: oldCookie });
-  assert.deepEqual(await oldSession.json(), { authenticated: false });
+  const oldSession = await call(handler, "GET", "/api/session", { cookie });
+  assert.equal((await oldSession.json()).authenticated, false);
 
-  const newSession = await call(handler, "GET", "/api/session", { cookie: newCookie });
-  assert.deepEqual(await newSession.json(), {
-    authenticated: true,
-    username: "tony",
-    mustChange: false,
+  const newSession = await callWithCsrf(handler, "GET", "/api/session", {
+    cookie: newCookie,
+    csrfToken,
   });
+  const newSessionBody = await newSession.json();
+  assert.equal(newSessionBody.authenticated, true);
+  assert.equal(newSessionBody.username, "tony");
+  assert.equal(newSessionBody.mustChange, false);
+  assert.ok(newSessionBody.csrfToken);
 
   const oldLogin = await login(handler);
   assert.equal(oldLogin.status, 401);
@@ -111,23 +148,26 @@ test("account changes bump the version and invalidate old sessions", async () =>
 
 test("account changes require the current password and a valid new one", async () => {
   const handler = makeHandler(memoryStore());
-  const cookie = cookieValue(await login(handler));
+  const { cookie, csrfToken } = await loginWithCsrf(handler);
 
-  const wrongCurrent = await call(handler, "PUT", "/api/account", {
+  const wrongCurrent = await callWithCsrf(handler, "PUT", "/api/account", {
     cookie,
+    csrfToken,
     body: { currentPassword: "nope", username: "tony" },
   });
   assert.equal(wrongCurrent.status, 401);
 
-  const weak = await call(handler, "PUT", "/api/account", {
+  const weak = await callWithCsrf(handler, "PUT", "/api/account", {
     cookie,
+    csrfToken,
     body: { currentPassword: "admin123!", newPassword: "short" },
   });
   assert.equal(weak.status, 400);
   assert.match((await weak.json()).error, /at least 10/);
 
-  const sameDefault = await call(handler, "PUT", "/api/account", {
+  const sameDefault = await callWithCsrf(handler, "PUT", "/api/account", {
     cookie,
+    csrfToken,
     body: { currentPassword: "admin123!", newPassword: "admin123!" },
   });
   assert.equal(sameDefault.status, 400);
@@ -143,9 +183,12 @@ test("account updates are rejected without a session", async () => {
 
 test("logout clears the cookie and cross-origin writes are refused", async () => {
   const handler = makeHandler(memoryStore());
-  const cookie = cookieValue(await login(handler));
+  const { cookie, csrfToken } = await loginWithCsrf(handler);
 
-  const logout = await call(handler, "POST", "/api/logout", { cookie });
+  const logout = await callWithCsrf(handler, "POST", "/api/logout", {
+    cookie,
+    csrfToken,
+  });
   assert.equal(logout.status, 200);
   assert.match(logout.headers.get("set-cookie"), /Max-Age=0/);
 
@@ -156,14 +199,27 @@ test("logout clears the cookie and cross-origin writes are refused", async () =>
   assert.equal(crossOrigin.status, 403);
 });
 
+test("mutating requests without CSRF token are refused", async () => {
+  const handler = makeHandler(memoryStore());
+  const { cookie } = await loginWithCsrf(handler);
+
+  const noToken = await call(handler, "PUT", "/api/account", {
+    cookie,
+    body: { currentPassword: "admin123!", username: "tony" },
+  });
+  assert.equal(noToken.status, 403);
+  assert.match((await noToken.json()).error, /CSRF/);
+});
+
 test("a conflicting credential write is refused", async () => {
   const store = memoryStore();
   const handler = makeHandler(store);
-  const cookie = cookieValue(await login(handler));
+  const { cookie, csrfToken } = await loginWithCsrf(handler);
 
   store.failNextMatch = true;
-  const response = await call(handler, "PUT", "/api/account", {
+  const response = await callWithCsrf(handler, "PUT", "/api/account", {
     cookie,
+    csrfToken,
     body: { currentPassword: "admin123!", username: "tony" },
   });
 

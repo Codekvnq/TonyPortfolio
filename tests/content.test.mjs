@@ -26,10 +26,38 @@ function handlerWithClock(store) {
   return makeHandler(store, { now: clock() });
 }
 
-async function signedIn(store) {
+async function loginWithCsrf(store) {
   const handler = handlerWithClock(store);
-  const cookie = cookieValue(await login(handler));
-  return { handler, cookie };
+  const response = await login(handler);
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  const cookie = cookieValue(response);
+  return { handler, cookie, csrfToken: body.csrfToken };
+}
+
+async function callWithCsrf(
+  handler,
+  method,
+  path,
+  { body, cookie, csrfToken, headers: extra } = {},
+) {
+  const headers = new Headers({
+    "x-forwarded-host": "portfolio.test",
+    "x-forwarded-proto": "https",
+    "content-type": "application/json",
+  });
+  if (cookie) headers.set("cookie", `admin_session=${cookie}`);
+  if (csrfToken) headers.set("x-csrf-token", csrfToken);
+  if (extra) {
+    for (const [name, value] of Object.entries(extra)) headers.set(name, value);
+  }
+  return handler(
+    new Request(`https://portfolio.test${path}`, {
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+    }),
+  );
 }
 
 test("content starts empty and is publicly readable with a short cache", async () => {
@@ -58,23 +86,26 @@ test("content saves require a session", async () => {
 
 test("content saves validate the payload and the base version", async () => {
   const store = memoryStore();
-  const { handler, cookie } = await signedIn(store);
+  const { handler, cookie, csrfToken } = await loginWithCsrf(store);
 
-  const missing = await call(handler, "PUT", "/api/content", {
+  const missing = await callWithCsrf(handler, "PUT", "/api/content", {
     cookie,
+    csrfToken,
     body: { content: { profile: {} }, baseVersion: 0 },
   });
   assert.equal(missing.status, 400);
   assert.match((await missing.json()).error, /missing/);
 
-  const badVersion = await call(handler, "PUT", "/api/content", {
+  const badVersion = await callWithCsrf(handler, "PUT", "/api/content", {
     cookie,
+    csrfToken,
     body: { content: sampleContent(), baseVersion: "zero" },
   });
   assert.equal(badVersion.status, 400);
 
-  const stale = await call(handler, "PUT", "/api/content", {
+  const stale = await callWithCsrf(handler, "PUT", "/api/content", {
     cookie,
+    csrfToken,
     body: { content: sampleContent(), baseVersion: 5 },
   });
   assert.equal(stale.status, 409);
@@ -83,10 +114,11 @@ test("content saves validate the payload and the base version", async () => {
 
 test("a saved content version round-trips and rejects stale writes", async () => {
   const store = memoryStore();
-  const { handler, cookie } = await signedIn(store);
+  const { handler, cookie, csrfToken } = await loginWithCsrf(store);
 
-  const save = await call(handler, "PUT", "/api/content", {
+  const save = await callWithCsrf(handler, "PUT", "/api/content", {
     cookie,
+    csrfToken,
     body: { content: sampleContent(), baseVersion: 0 },
   });
   assert.equal(save.status, 200);
@@ -100,8 +132,9 @@ test("a saved content version round-trips and rejects stale writes", async () =>
   assert.equal(body.content.profile.name, "Anthony Ampaabeng");
   assert.ok(body.updatedAt);
 
-  const stale = await call(handler, "PUT", "/api/content", {
+  const stale = await callWithCsrf(handler, "PUT", "/api/content", {
     cookie,
+    csrfToken,
     body: {
       content: sampleContent({ profile: { ...sampleContent().profile, name: "Stale" } }),
       baseVersion: 0,
@@ -115,9 +148,10 @@ test("a saved content version round-trips and rejects stale writes", async () =>
 
 test("content reads support ETag revalidation and a fresh bypass", async () => {
   const store = memoryStore();
-  const { handler, cookie } = await signedIn(store);
-  await call(handler, "PUT", "/api/content", {
+  const { handler, cookie, csrfToken } = await loginWithCsrf(store);
+  await callWithCsrf(handler, "PUT", "/api/content", {
     cookie,
+    csrfToken,
     body: { content: sampleContent(), baseVersion: 0 },
   });
 
@@ -137,14 +171,16 @@ test("content reads support ETag revalidation and a fresh bypass", async () => {
 
 test("revisions list, read and restore older content", async () => {
   const store = memoryStore();
-  const { handler, cookie } = await signedIn(store);
+  const { handler, cookie, csrfToken } = await loginWithCsrf(store);
 
-  await call(handler, "PUT", "/api/content", {
+  await callWithCsrf(handler, "PUT", "/api/content", {
     cookie,
+    csrfToken,
     body: { content: sampleContent(), baseVersion: 0 },
   });
-  await call(handler, "PUT", "/api/content", {
+  await callWithCsrf(handler, "PUT", "/api/content", {
     cookie,
+    csrfToken,
     body: {
       content: sampleContent({
         profile: { ...sampleContent().profile, name: "Second Version" },
@@ -170,11 +206,11 @@ test("revisions list, read and restore older content", async () => {
   const revisionBody = await revision.json();
   assert.equal(revisionBody.content.profile.name, "Anthony Ampaabeng");
 
-  const restore = await call(
+  const restore = await callWithCsrf(
     handler,
     "POST",
     `/api/revisions/${items[1].id}/restore`,
-    { cookie },
+    { cookie, csrfToken },
   );
   assert.equal(restore.status, 200);
   assert.equal((await restore.json()).version, 3);
@@ -183,23 +219,24 @@ test("revisions list, read and restore older content", async () => {
   assert.equal(current.version, 3);
   assert.equal(current.content.profile.name, "Anthony Ampaabeng");
 
-  const missing = await call(
+  const missing = await callWithCsrf(
     handler,
     "POST",
     "/api/revisions/not-a-revision/restore",
-    { cookie },
+    { cookie, csrfToken },
   );
   assert.equal(missing.status, 404);
 });
 
 test("revisions are pruned to the newest snapshots", async () => {
   const store = memoryStore();
-  const { handler, cookie } = await signedIn(store);
+  const { handler, cookie, csrfToken } = await loginWithCsrf(store);
 
   let version = 0;
   for (let index = 0; index < MAX_REVISIONS + 3; index += 1) {
-    const response = await call(handler, "PUT", "/api/content", {
+    const response = await callWithCsrf(handler, "PUT", "/api/content", {
       cookie,
+      csrfToken,
       body: {
         content: sampleContent({
           meta: { updatedAt: null, note: `save-${index}` },

@@ -12,6 +12,7 @@ import {
   isSecureRequest,
   makeSalt,
   makeSessionSecret,
+  makeCsrfToken,
   parseCookies,
   sessionCookie,
   signSession,
@@ -398,6 +399,10 @@ export function createApiHandler({
 
     const username = String(body.value.username ?? "").trim();
     const password = String(body.value.password ?? "");
+    const honeypot = String(body.value.website ?? "").trim();
+    if (honeypot) {
+      return json({ error: "That username or password is not correct." }, 401);
+    }
     if (!username || !password) {
       return json({ error: "Enter your username and password." }, 400);
     }
@@ -447,6 +452,12 @@ export function createApiHandler({
     const remember = body.value.remember === true;
     const ttl = remember ? REMEMBER_TTL_SECONDS : SESSION_TTL_SECONDS;
     const secret = await loadSecret(db);
+    const csrfToken = makeCsrfToken();
+    try {
+      await db.set("csrf-token", csrfToken, { onlyIfNew: false });
+    } catch {
+      // Best-effort; CSRF validation degrades gracefully if storage fails.
+    }
     const token = signSession({
       secret,
       username: record.username,
@@ -456,7 +467,12 @@ export function createApiHandler({
     });
 
     return json(
-      { ok: true, username: record.username, mustChange: Boolean(record.mustChange) },
+      {
+        ok: true,
+        username: record.username,
+        mustChange: Boolean(record.mustChange),
+        csrfToken,
+      },
       200,
       {
         "set-cookie": sessionCookie(token, {
@@ -476,10 +492,12 @@ export function createApiHandler({
       return json({ authenticated: false }, 200, headers);
     }
 
+    const storedCsrf = await readText(db, "csrf-token").catch(() => null);
     return json({
       authenticated: true,
       username: session.auth.value.username,
       mustChange: Boolean(session.auth.value.mustChange),
+      csrfToken: storedCsrf || null,
     });
   }
 
@@ -589,6 +607,22 @@ export function createApiHandler({
     );
   }
 
+  async function handleCsrfGet(req, db) {
+    const session = await requireSession(req, db);
+    if (!session) return json({ error: "Sign in to continue." }, 401);
+    const stored = await readText(db, "csrf-token").catch(() => null);
+    return json({ csrfToken: stored || null });
+  }
+
+  async function validateCsrf(req, db) {
+    const token = req.headers.get("x-csrf-token") || "";
+    const stored = await readText(db, "csrf-token").catch(() => null);
+    if (!stored || !token || token !== stored) {
+      return false;
+    }
+    return true;
+  }
+
   return async function handler(req) {
     let path;
     try {
@@ -604,12 +638,35 @@ export function createApiHandler({
     try {
       const db = await database();
 
+      const isMutating =
+        req.method === "POST" ||
+        req.method === "PUT" ||
+        req.method === "DELETE";
+      const csrfExempt =
+        (req.method === "GET" && path === "/api/ping") ||
+        (req.method === "GET" && path === "/api/csrf") ||
+        (req.method === "POST" && path === "/api/login") ||
+        (req.method === "GET" && path === "/api/session");
+
+      if (isMutating && !csrfExempt) {
+        const session = await readSession(req, db);
+        if (session.authenticated) {
+          const csrfValid = await validateCsrf(req, db).catch(() => false);
+          if (!csrfValid) {
+            return json({ error: "CSRF token missing or invalid." }, 403);
+          }
+        }
+      }
+
       if (req.method === "GET" && path === "/api/ping") {
         return json({
           ok: true,
           service: "portfolio-admin-api",
           now: new Date(now()).toISOString(),
         });
+      }
+      if (req.method === "GET" && path === "/api/csrf") {
+        return await handleCsrfGet(req, db);
       }
       if (req.method === "POST" && path === "/api/login") {
         return await handleLogin(req, db);

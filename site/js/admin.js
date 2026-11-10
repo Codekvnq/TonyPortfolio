@@ -43,7 +43,8 @@
     mustChange: false,
     loading: false,
     idleTimeout: null,
-    accountEditing: false
+    accountEditing: false,
+    csrfToken: null
   };
 
   var saveTimer = null;
@@ -146,6 +147,11 @@
     var timer = control
       ? window.setTimeout(function () { control.abort(); }, timeout || 12000)
       : null;
+
+    var method = (config.method || 'GET').toUpperCase();
+    if (state.csrfToken && method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
+      config.headers['x-csrf-token'] = state.csrfToken;
+    }
 
     return window.fetch(path, config).then(function (response) {
       if (timer) window.clearTimeout(timer);
@@ -659,6 +665,9 @@
     };
     state.username = state.session.username;
     state.mustChange = state.session.mustChange;
+    if (session.csrfToken) {
+      state.csrfToken = session.csrfToken;
+    }
     Array.prototype.forEach.call(document.querySelectorAll('.user-name'), function (node) {
       node.textContent = state.username || 'Owner';
     });
@@ -2683,8 +2692,8 @@
     var current = Store.serverVersion();
     return historyState.items.map(function (item) {
       var isCurrent = Number(item.version) === Number(current);
-      return '<tr><td><strong>Version ' + esc(item.version) + '</strong>' + (isCurrent ? ' <span class="pill pill-published">Live</span>' : '') + '</td>' +
-        '<td class="muted-cell">' + esc(relativeSaved(item.createdAt)) + ' · ' + esc(formatDate(item.createdAt)) + '</td>' +
+      return '<tr><td class="version-cell"><strong>Version ' + esc(item.version) + '</strong>' + (isCurrent ? ' <span class="pill pill-published">Live</span>' : '') + '</td>' +
+        '<td class="time-cell muted-cell">' + esc(relativeSaved(item.createdAt)) + ' · ' + esc(formatDate(item.createdAt)) + '</td>' +
         '<td class="col-actions">' +
         '<button class="btn btn-secondary btn-sm" type="button" data-history-action="restore" data-revision-id="' + esc(item.id) + '" data-revision-version="' + esc(item.version) + '"' +
         (isCurrent ? ' disabled' : '') + '>' + icon('rotate') + 'Restore</button></td></tr>';

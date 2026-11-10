@@ -57,6 +57,11 @@
 
           <p class="form-error" id="loginError" role="alert"></p>
 
+          <div class="field honeypot" style="position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden;opacity:0">
+            <label>Please leave this field empty</label>
+            <input name="website" type="text" tabindex="-1" autocomplete="off">
+          </div>
+
           <label class="remember-field">
             <input id="loginRemember" name="remember" type="checkbox">
             <span>Keep me signed in for 30 days</span>

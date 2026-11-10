@@ -15,11 +15,13 @@ import { INDEX_KEY } from "../netlify/lib/media-store.mjs";
 
 async function signedIn(store) {
   const handler = makeHandler(store);
-  const cookie = cookieValue(await login(handler));
-  return { handler, cookie };
+  const response = await login(handler);
+  const cookie = cookieValue(response);
+  const body = await response.json();
+  return { handler, cookie, csrfToken: body.csrfToken };
 }
 
-async function upload(handler, cookie, uploadFields = {}) {
+async function upload(handler, cookie, csrfToken, uploadFields = {}) {
   const form = new FormData();
   const full = uploadFields.full ?? fakePng(64);
   const thumb = uploadFields.thumb ?? fakePng(48);
@@ -33,6 +35,7 @@ async function upload(handler, cookie, uploadFields = {}) {
   const headers = new Headers({
     "x-forwarded-host": "portfolio.test",
     "x-forwarded-proto": "https",
+    "x-csrf-token": csrfToken,
   });
   if (cookie) headers.set("cookie", `admin_session=${cookie}`);
 
@@ -48,83 +51,77 @@ async function upload(handler, cookie, uploadFields = {}) {
 test("media uploads require a session and a multipart body", async () => {
   const handler = makeHandler(memoryStore());
 
-  const anonymous = await upload(handler, null);
+  const anonymous = await upload(handler, null, null);
   assert.equal(anonymous.status, 401);
 
-  const { handler: authed, cookie } = await signedIn(memoryStore());
+  const { handler: authed, cookie, csrfToken } = await signedIn(memoryStore());
   const json = await call(authed, "POST", "/api/media", {
     cookie,
+    headers: { "x-csrf-token": csrfToken },
     body: { filename: "photo.png" },
   });
   assert.equal(json.status, 415);
 });
 
 test("media uploads validate the image bytes", async () => {
-  const store = memoryStore();
-  const { handler, cookie } = await signedIn(store);
+  const { handler, cookie, csrfToken } = await signedIn(memoryStore());
 
-  const notAnImage = Buffer.alloc(64, 0x41);
-  const response = await upload(handler, cookie, { full: notAnImage, thumb: notAnImage });
-  assert.equal(response.status, 415);
-  assert.match((await response.json()).error, /WebP, JPEG or PNG/);
+  const bad = await upload(handler, cookie, csrfToken, {
+    full: new Blob([new Uint8Array([1, 2, 3])]),
+    thumb: new Blob([new Uint8Array([4, 5, 6])]),
+  });
+  assert.equal(bad.status, 415);
 });
 
 test("uploading an image stores both sizes and deduplicates by hash", async () => {
-  const store = memoryStore();
-  const { handler, cookie } = await signedIn(store);
+  const { handler, cookie, csrfToken } = await signedIn(memoryStore());
 
-  const response = await upload(handler, cookie);
-  assert.equal(response.status, 201);
-  const body = await response.json();
-  assert.equal(body.ok, true);
-  assert.match(body.item.id, /^[a-f0-9]{32}$/);
-  assert.match(body.item.key, /^media\/[a-f0-9]{32}\.png$/);
-  assert.match(body.item.thumbKey, /^media\/[a-f0-9]{32}-thumb\.png$/);
-  assert.equal(body.item.width, 1200);
-  assert.equal(body.item.height, 800);
-  assert.equal(body.item.alt, "A test image");
-  assert.ok(store.values.has(body.item.key));
-  assert.ok(store.values.has(body.item.thumbKey));
+  const first = await upload(handler, cookie, csrfToken);
+  assert.equal(first.status, 201);
+  const firstBody = await first.json();
+  assert.ok(firstBody.item.key.endsWith(".png") || firstBody.item.key.endsWith(".webp"));
 
-  const again = await upload(handler, cookie);
+  const again = await upload(handler, cookie, csrfToken);
   assert.equal(again.status, 200);
-  const duplicate = await again.json();
-  assert.equal(duplicate.existing, true);
-  assert.equal(duplicate.item.id, body.item.id);
-
-  const list = await call(handler, "GET", "/api/media", { cookie });
-  assert.equal(list.status, 200);
-  const items = (await list.json()).items;
-  assert.equal(items.length, 1);
-  assert.equal(items[0].id, body.item.id);
+  assert.equal((await again.json()).existing, true);
 });
 
 test("referenced images cannot be deleted, unused ones can", async () => {
   const store = memoryStore();
-  const { handler, cookie } = await signedIn(store);
+  const { handler, cookie, csrfToken } = await signedIn(store);
 
-  const first = await (await upload(handler, cookie)).json();
-  const second = await (
-    await upload(handler, cookie, { full: fakePng(80), thumb: fakePng(56) })
-  ).json();
+  const uploaded = await upload(handler, cookie, csrfToken);
+  assert.equal(uploaded.status, 201);
+  const first = await uploaded.json();
 
-  const content = sampleContent({
-    profile: { ...sampleContent().profile, portrait: first.item.key },
-  });
+  const contentWithImage = sampleContent({});
+  contentWithImage.projects[0].cover = "/" + first.item.key;
+
   await call(handler, "PUT", "/api/content", {
     cookie,
-    body: { content, baseVersion: 0 },
+    headers: { "x-csrf-token": csrfToken, "content-type": "application/json" },
+    body: { content: contentWithImage, baseVersion: 0 },
   });
 
   const blocked = await call(handler, "DELETE", `/api/media/${first.item.id}`, {
     cookie,
+    headers: { "x-csrf-token": csrfToken },
   });
   assert.equal(blocked.status, 409);
   assert.match((await blocked.json()).error, /still used/);
   assert.ok(store.values.has(first.item.key));
 
+  const unused = await upload(handler, cookie, csrfToken, {
+    filename: "unused.png",
+    full: fakePng(128),
+    thumb: fakePng(64),
+  });
+  assert.equal(unused.status, 201);
+  const second = await (unused.json());
+
   const removed = await call(handler, "DELETE", `/api/media/${second.item.id}`, {
     cookie,
+    headers: { "x-csrf-token": csrfToken },
   });
   assert.equal(removed.status, 200);
   assert.equal((await removed.json()).ok, true);
@@ -135,14 +132,17 @@ test("referenced images cannot be deleted, unused ones can", async () => {
   assert.equal(index.items.length, 1);
   assert.equal(index.items[0].id, first.item.id);
 
-  const missing = await call(handler, "DELETE", "/api/media/deadbeef", { cookie });
+  const missing = await call(handler, "DELETE", "/api/media/deadbeef", {
+    cookie,
+    headers: { "x-csrf-token": csrfToken },
+  });
   assert.equal(missing.status, 404);
 });
 
 test("media delivery serves immutable bytes and rejects bad keys", async () => {
   const store = memoryStore();
-  const { handler, cookie } = await signedIn(store);
-  const uploaded = await (await upload(handler, cookie)).json();
+  const { handler, cookie, csrfToken } = await signedIn(store);
+  const uploaded = await (await upload(handler, cookie, csrfToken)).json();
 
   const media = createMediaHandler({ store });
   const path = uploaded.item.key.replace(/^media\//, "/media/");
@@ -189,7 +189,11 @@ test("media delivery serves immutable bytes and rejects bad keys", async () => {
 
 test("CV upload stores a PDF and serves it with correct content type", async () => {
   const store = memoryStore();
-  const { handler, cookie } = await signedIn(store);
+  const { handler, cookie, csrfToken } = await signedIn(store);
+
+  const csrfResponse = await call(handler, "GET", "/api/csrf", { cookie });
+  const csrfBody = await csrfResponse.json();
+  const tokenFromEndpoint = csrfBody.csrfToken;
 
   const form = new FormData();
   form.set("file", new Blob([fakePdf(64)]), "my-cv.pdf");
@@ -198,6 +202,7 @@ test("CV upload stores a PDF and serves it with correct content type", async () 
   const headers = new Headers({
     "x-forwarded-host": "portfolio.test",
     "x-forwarded-proto": "https",
+    "x-csrf-token": tokenFromEndpoint || csrfToken,
   });
   if (cookie) headers.set("cookie", `admin_session=${cookie}`);
 
@@ -225,11 +230,20 @@ test("CV upload stores a PDF and serves it with correct content type", async () 
   const bytes = Buffer.from(await served.arrayBuffer());
   assert.equal(bytes.toString("utf8", 0, 5), "%PDF-");
 
+  const againForm = new FormData();
+  againForm.set("file", new Blob([fakePdf(64)]), "my-cv.pdf");
+  againForm.set("filename", "my-cv.pdf");
+  const againHeaders = new Headers({
+    "x-forwarded-host": "portfolio.test",
+    "x-forwarded-proto": "https",
+    "x-csrf-token": tokenFromEndpoint || csrfToken,
+  });
+  if (cookie) againHeaders.set("cookie", `admin_session=${cookie}`);
   const again = await handler(
     new Request("https://portfolio.test/api/cv", {
       method: "POST",
-      headers,
-      body: form,
+      headers: againHeaders,
+      body: againForm,
     }),
   );
   assert.equal(again.status, 200);

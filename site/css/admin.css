@@ -3537,6 +3537,48 @@ select.select-inline {
   padding: 2px 8px;
 }
 
+/* History table column alignment ----------------------------------------- */
+
+.data-table .col-actions {
+  width: 120px;
+  text-align: right;
+}
+
+.data-table .col-actions .btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  justify-content: flex-end;
+  padding: 6px 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.data-table .col-actions .btn svg.icon {
+  width: 13px;
+  height: 13px;
+}
+
+/* Data table general refinements for all list screens ------------------- */
+
+.data-table th.col-actions,
+.data-table td.col-actions {
+  white-space: nowrap;
+}
+
+.data-table td.version-cell strong,
+.data-table td.version-cell {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.data-table td.time-cell {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 /* Idle / inactivity warning --------------------------------------------- */
 
 .idle-warning {
