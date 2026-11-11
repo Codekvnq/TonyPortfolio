@@ -2787,6 +2787,14 @@ select.select-inline {
   pointer-events: none;
 }
 
+.toast-region[popover] {
+  position: fixed;
+  right: 22px;
+  bottom: 22px;
+  z-index: auto;
+  width: min(340px, calc(100vw - 32px));
+}
+
 .toast {
   position: relative;
   z-index: 2147483647;

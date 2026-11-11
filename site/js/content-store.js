@@ -411,6 +411,22 @@
   var currentUpdatedAt = current.meta && current.meta.updatedAt;
   var refreshPromise = null;
   var writeChain = Promise.resolve();
+  var csrfToken = null;
+
+  function fetchCsrfToken() {
+    return apiFetch(API.replace('/content', '/csrf'), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json' }
+    }).then(function (response) {
+      return response.json();
+    }).then(function (payload) {
+      if (payload.csrfToken) {
+        csrfToken = payload.csrfToken;
+      }
+    }).catch(function () {
+      // Ignore failures; the save will fail with 403 and the user can retry.
+    });
+  }
 
   function get() {
     return clone(current);
@@ -483,22 +499,54 @@
     var next = normalize(data);
     next.meta = Object.assign({}, next.meta, { updatedAt: new Date().toISOString() });
 
+    var headers = { 'content-type': 'application/json', accept: 'application/json' };
+    if (csrfToken) {
+      headers['x-csrf-token'] = csrfToken;
+    }
+
     return apiFetch(API, {
       method: 'PUT',
-      headers: { 'content-type': 'application/json', accept: 'application/json' },
+      headers: headers,
       body: JSON.stringify({ content: next, baseVersion: currentVersion })
     }, 20000).then(function (response) {
       return response.json().catch(function () { return {}; }).then(function (payload) {
         if (response.status === 401) {
           return { ok: false, unauthorized: true, error: 'Your session expired. Sign in again.' };
         }
-        if (response.status === 409) {
-          return {
-            ok: false,
-            conflict: true,
-            currentVersion: payload.currentVersion,
-            error: payload.error || 'Content changed elsewhere. Reload before saving.'
-          };
+        if (response.status === 403) {
+          // CSRF token may be stale; fetch a fresh one and retry once
+          return fetchCsrfToken().then(function () {
+            headers['x-csrf-token'] = csrfToken;
+            return apiFetch(API, {
+              method: 'PUT',
+              headers: headers,
+              body: JSON.stringify({ content: next, baseVersion: currentVersion })
+            }, 20000);
+          }).then(function (response) {
+            return response.json().catch(function () { return {}; }).then(function (payload) {
+              if (response.status === 401) {
+                return { ok: false, unauthorized: true, error: 'Your session expired. Sign in again.' };
+              }
+              if (response.status === 409) {
+                return {
+                  ok: false,
+                  conflict: true,
+                  currentVersion: payload.currentVersion,
+                  error: payload.error || 'Content changed elsewhere. Reload before saving.'
+                };
+              }
+              if (!response.ok) {
+                return { ok: false, error: payload.error || 'Could not save your changes.' };
+              }
+              current = next;
+              currentVersion = Number(payload.version) || currentVersion + 1;
+              currentUpdatedAt = payload.updatedAt || next.meta.updatedAt;
+              current.meta.updatedAt = currentUpdatedAt;
+              writeCache(current);
+              announce(current);
+              return { ok: true, data: clone(current), version: currentVersion };
+            });
+          });
         }
         if (!response.ok) {
           return { ok: false, error: payload.error || 'Could not save your changes.' };
@@ -563,6 +611,7 @@
     subscribe: subscribe,
     storageAvailable: storageAvailable,
     serverVersion: function () { return currentVersion; },
-    updatedAt: function () { return currentUpdatedAt; }
+    updatedAt: function () { return currentUpdatedAt; },
+    setCsrfToken: function (token) { csrfToken = token; }
   };
 })();

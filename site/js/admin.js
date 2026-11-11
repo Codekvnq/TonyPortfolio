@@ -295,6 +295,7 @@
     node.className = 'toast' + (tone ? ' ' + tone : '');
     node.innerHTML = icon(tone === 'error' ? 'alert' : tone === 'info' ? 'info' : 'check') + '<span>' + esc(message) + '</span>';
     toastRegion.appendChild(node);
+    toastRegion.showPopover();
     window.setTimeout(function () {
       node.style.opacity = '0';
       node.style.transform = 'translateY(4px)';
@@ -744,6 +745,7 @@
     state.mustChange = state.session.mustChange;
     if (session.csrfToken) {
       state.csrfToken = session.csrfToken;
+      Store.setCsrfToken(session.csrfToken);
     }
     Array.prototype.forEach.call(document.querySelectorAll('.user-name'), function (node) {
       node.textContent = state.username || 'Owner';
