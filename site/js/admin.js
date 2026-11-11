@@ -675,10 +675,6 @@
           }
         };
         xhr.onload = function () {
-          if (xhr.status === 401 || xhr.status === 403) {
-            reject(new Error('Your session expired. Sign in again.'));
-            return;
-          }
           if (xhr.status >= 400) {
             try {
               var body = JSON.parse(xhr.responseText);
@@ -716,7 +712,6 @@
         form.append('timestamp', String(signData.timestamp));
         form.append('signature', signData.signature);
         form.append('folder', signData.folder);
-        form.append('resource_type', 'video');
 
         xhr.send(form);
       }).catch(function (error) {

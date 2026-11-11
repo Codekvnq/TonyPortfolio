@@ -395,10 +395,9 @@ export function createApiHandler({
     }
 
     const timestamp = Math.floor(Date.now() / 1000);
-    // Cloudinary signature: include ALL params except 'file' and 'signature', alphabetically
-    // resource_type=video is required for video uploads
-    const signatureString = `api_key=${apiKey}&folder=portfolio&resource_type=video&timestamp=${timestamp}${apiSecret}`;
-    const signature = createHash("sha256")
+    // Cloudinary signature: include ALL params except 'file', 'api_key', 'resource_type', 'signature'
+    const signatureString = `folder=portfolio&timestamp=${timestamp}${apiSecret}`;
+    const signature = createHash("sha1")
       .update(signatureString)
       .digest("hex");
 
@@ -409,7 +408,6 @@ export function createApiHandler({
       timestamp,
       signature,
       folder: "portfolio",
-      resource_type: "video",
       uploadUrl: `https://api.cloudinary.com/v1_1/${cloudName}/video/upload`,
     });
   }
