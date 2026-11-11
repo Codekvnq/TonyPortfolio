@@ -1677,6 +1677,9 @@
     var existing = id ? state.data.projects.find(function (project) { return project.id === id; }) : null;
     var project = existing ? JSON.parse(JSON.stringify(existing)) : blankProject();
     var isEdit = Boolean(existing);
+    // A new dialog starts with no pending video, so a file chosen in an
+    // abandoned form can never be uploaded for the next project.
+    videoUploadState = { status: 'idle', file: null, item: null, error: null, progress: 0, promise: null };
 
     var dialog = document.createElement('dialog');
     dialog.className = 'dialog';
@@ -1996,6 +1999,14 @@
             return p.id !== project.id && p.videoUrl === project.videoUrl;
           });
           if (existingUse) {
+            // Drop the copy we just uploaded so Cloudinary does not collect orphans.
+            if (videoUploadState.item && videoUploadState.item.id) {
+              apiJson('/api/video-delete', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ public_id: videoUploadState.item.id }),
+              }).catch(function () { /* best effort */ });
+            }
             restoreForm();
             toast('This video is already used by another project ("' + existingUse.title + '").', 'error');
             return;
