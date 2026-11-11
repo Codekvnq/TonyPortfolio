@@ -2903,6 +2903,10 @@ select.select-inline {
   color: rgba(255, 255, 255, 0.7);
 }
 
+.publishing-overlay.hidden {
+  display: none;
+}
+
 .admin-footer {
   display: flex;
   align-items: center;

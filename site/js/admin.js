@@ -537,7 +537,9 @@
       if (!existing.open) existing.remove();
     });
     dialogRoot.appendChild(dialog);
-    dialog.addEventListener('close', function () { dialog.remove(); });
+    dialog.addEventListener('close', function () {
+      if (!dialog.keep) dialog.remove();
+    });
     dialog.showModal();
     return dialog;
   }
@@ -2009,18 +2011,28 @@
         showPublishingOverlay();
       }
 
-      if (isEdit) {
-        saveData(function (data) {
-          var index = data.projects.findIndex(function (item) { return item.id === project.id; });
-          if (index !== -1) data.projects[index] = project;
-        }, { toast: 'Project updated.' });
+      var index = data.projects.findIndex(function (item) { return item.id === project.id; });
+      if (isEdit && index !== -1) {
+        data.projects[index] = project;
       } else {
-        saveData(function (data) {
-          data.projects.unshift(project);
-        }, { toast: 'Project added to the portfolio.' });
+        data.projects.unshift(project);
       }
 
-      await flushSave();
+      try {
+        await flushSave();
+      } catch (error) {
+        // Rollback: remove the project we just added/modified
+        if (isEdit && index !== -1) {
+          data.projects.splice(index, 1);
+        } else {
+          data.projects.pop();
+        }
+        hidePublishingOverlay();
+        dialog.close();
+        dialog.remove();
+        toast(error.message || 'Save failed. Please try again.', 'error');
+        return;
+      }
 
       hidePublishingOverlay();
       dialog.close();
