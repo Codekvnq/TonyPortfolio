@@ -336,12 +336,28 @@ svg.icon-sm {
    Loading spinners
    -------------------------------------------------------------------------- */
 
-.login-loading {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  padding: 16px 0;
+/* The sign-in button is the only loading indicator for a sign-in: the spinner
+   lives inside it so there is never a second one underneath. */
+.login-submit {
+  position: relative;
+}
+
+.login-submit .btn-spinner {
+  display: none;
+  width: 14px;
+  height: 14px;
+  border-width: 2px;
+  border-color: rgba(255, 255, 255, 0.35);
+  border-top-color: #ffffff;
+}
+
+.login-submit.is-busy .btn-spinner {
+  display: inline-block;
+}
+
+.login-submit:disabled {
+  cursor: progress;
+  opacity: 0.85;
 }
 
 .spinner {
@@ -2731,6 +2747,53 @@ select.select-inline {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.video-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.video-preview {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px dashed var(--control);
+  border-radius: var(--radius-control);
+  background: var(--raised);
+  font-size: 12px;
+}
+
+.video-preview-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.video-preview-state {
+  color: var(--muted);
+}
+
+.video-progress {
+  height: 6px;
+  margin-top: 8px;
+  border-radius: 3px;
+  background: var(--control);
+  overflow: hidden;
+}
+
+.video-progress-bar {
+  width: 0;
+  height: 100%;
+  background: var(--accent);
+  transition: width 120ms linear;
 }
 
 .gallery-list {

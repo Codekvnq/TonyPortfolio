@@ -197,7 +197,10 @@
 
   function setLoginBusy(busy, label) {
     loginButton.disabled = busy;
-    loginButton.textContent = busy ? (label || 'Signing in…') : 'Sign in';
+    loginButton.classList.toggle('is-busy', Boolean(busy));
+    loginButton.setAttribute('aria-busy', busy ? 'true' : 'false');
+    var text = loginButton.querySelector('.btn-label');
+    if (text) text.textContent = busy ? (label || 'Signing in…') : 'Sign in';
   }
 
   // The admin lives in /admin/, so site-relative assets need one level up.
@@ -905,7 +908,8 @@
     hydrateIcons(adminApp);
     pageContent.innerHTML = skeletonHtml();
     setSaveState('saved');
-    showGlobalLoading();
+    // The skeleton page is the only loading state here. Showing the global
+    // spinner too made the sign-in flash two spinners in a row.
     return Store.ready().then(function (data) {
       state.data = data;
       state.snapshot = JSON.parse(JSON.stringify(data));
@@ -1014,7 +1018,6 @@
      ------------------------------------------------------------------------ */
 
   var globalLoading = document.getElementById('globalLoading');
-  var loginLoading = document.getElementById('loginLoading');
 
   function showGlobalLoading() {
     if (globalLoading) globalLoading.classList.remove('hidden');
@@ -1022,14 +1025,6 @@
 
   function hideGlobalLoading() {
     if (globalLoading) globalLoading.classList.add('hidden');
-  }
-
-  function showLoginLoading() {
-    if (loginLoading) loginLoading.hidden = false;
-  }
-
-  function hideLoginLoading() {
-    if (loginLoading) loginLoading.hidden = true;
   }
 
   /* ------------------------------------------------------------------------
@@ -1052,7 +1047,6 @@
     }
     loginError.textContent = '';
     setLoginBusy(true);
-    showLoginLoading();
     apiJson('/api/login', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -1073,7 +1067,6 @@
       loginError.textContent = networkMessage(error);
     }).then(function () {
       setLoginBusy(false);
-      hideLoginLoading();
     });
   });
 
@@ -1701,7 +1694,7 @@
       '<div class="drop-empty" id="coverEmpty"' + (project.cover ? ' hidden' : '') + '>' + icon('image') + '<span>Drop image<br>or choose a file</span></div></div>' +
       '<div class="image-field-actions"><div class="row">' +
       '<button class="btn btn-secondary btn-sm" type="button" data-choose-cover>' + icon('upload') + 'Choose image</button>' +
-      '<button class="btn btn-ghost btn-sm" type="button" data-clear-cover>Remove</button></div>' +
+      '<button class="btn btn-ghost btn-sm" type="button" data-clear-cover' + (project.cover ? '' : ' hidden') + '>Remove</button></div>' +
       '<div class="field"><label for="coverUrl">Image URL</label><input class="input" id="coverUrl" type="text" value="' + esc(project.cover) + '" placeholder="images/portfolio/01.jpeg" spellcheck="false"></div>' +
       '<p class="field-help">Uploads are optimised and saved to the media library with a permanent /media/ URL.</p></div></div>' +
       '<input type="file" id="coverFile" accept="image/*" hidden></section>' +
@@ -1725,17 +1718,15 @@
       '<div class="field span-2"><label for="projectVideo">Video file</label>' +
       '<div class="video-field">' +
       '<input type="file" id="projectVideoFile" accept="video/*" hidden>' +
-      '<button class="btn btn-secondary btn-sm" type="button" id="projectVideoChoose">' + icon('upload') + 'Choose video</button>' +
-      '<button class="btn btn-ghost btn-sm" type="button" id="projectVideoClear" style="margin-left:8px">' + icon('trash') + 'Clear</button>' +
-      '<div class="video-preview" id="projectVideoPreview" style="margin-top:8px;padding:12px;border:1px dashed var(--control);border-radius:var(--radius-control);background:var(--raised);font-size:12px;color:var(--muted);display:none">' +
-      '<span class="video-preview-name" style="font-weight:600;color:var(--text)"></span>' +
-      ' <small style="color:var(--muted)">· uploaded</small>' +
-      '<button class="btn btn-ghost btn-sm" type="button" id="projectVideoRemove" style="float:right;margin-top:-4px">' + icon('x') + '</button>' +
+      '<div class="video-actions"><button class="btn btn-secondary btn-sm" type="button" id="projectVideoChoose">' + icon('upload') + '<span id="projectVideoChooseLabel">Choose video</span></button>' +
+      '<button class="btn btn-ghost btn-sm" type="button" id="projectVideoClear" hidden>' + icon('trash') + 'Remove video</button></div>' +
+      '<div class="video-preview" id="projectVideoPreview" hidden>' +
+      '<span class="video-preview-name"></span><small class="video-preview-state"></small>' +
       '</div>' +
-      '<div class="video-progress" id="videoProgress" style="margin-top:8px;display:none;height:6px;background:var(--control);border-radius:3px;overflow:hidden">' +
-      '<div class="video-progress-bar" style="width:0%;height:100%;background:var(--accent)"></div>' +
+      '<div class="video-progress" id="videoProgress" hidden>' +
+      '<div class="video-progress-bar"></div>' +
       '</div>' +
-      '<p class="field-help">Upload a video file directly. It will be hosted and embedded in the lightbox. Max 500 MB.</p></div>' +
+      '<p class="field-help">Only needed for video projects. Upload the file here and it is hosted for the lightbox. Max 500 MB.</p></div>' +
       '<div class="field span-2"><label for="projectDescription">Short description</label><textarea class="input" id="projectDescription" rows="3" placeholder="Optional note about the work">' + esc(project.description) + '</textarea></div>' +
       '</div></section>' +
 
@@ -1757,6 +1748,7 @@
     var coverUrl = dialog.querySelector('#coverUrl');
     var coverDrop = dialog.querySelector('#coverDrop');
     var coverFile = dialog.querySelector('#coverFile');
+    var coverClearBtn = dialog.querySelector('[data-clear-cover]');
     var galleryList = dialog.querySelector('#galleryList');
 
     function setCover(src) {
@@ -1765,6 +1757,7 @@
       coverImage.hidden = !project.cover;
       coverEmpty.hidden = Boolean(project.cover);
       coverUrl.value = project.cover;
+      coverClearBtn.hidden = !project.cover;
     }
 
     function renderGallery() {
@@ -1840,17 +1833,47 @@
 
     var videoFileInput = dialog.querySelector('#projectVideoFile');
     var videoChooseBtn = dialog.querySelector('#projectVideoChoose');
+    var videoChooseLabel = dialog.querySelector('#projectVideoChooseLabel');
     var videoClearBtn = dialog.querySelector('#projectVideoClear');
     var videoPreview = dialog.querySelector('#projectVideoPreview');
     var videoPreviewName = dialog.querySelector('#projectVideoPreview .video-preview-name');
+    var videoPreviewState = dialog.querySelector('#projectVideoPreview .video-preview-state');
     var videoProgress = dialog.querySelector('#videoProgress');
     var videoProgressBar = dialog.querySelector('.video-progress-bar');
-    var videoRemoveBtn = dialog.querySelector('#projectVideoRemove');
+
+    function fileName(src) {
+      var clean = String(src || '').split('?')[0].split('#')[0];
+      var parts = clean.split('/');
+      var last = parts[parts.length - 1] || clean;
+      try { return decodeURIComponent(last); } catch (error) { return last; }
+    }
+
+    // The remove control only exists once there is something to remove: a file
+    // picked in this dialog, or a video already saved on the project.
+    function renderVideo() {
+      var uploading = videoUploadState.status === 'uploading';
+      var picked = Boolean(videoUploadState.file) &&
+        (videoUploadState.status === 'selected' || videoUploadState.status === 'error');
+      var saved = Boolean(project.videoUrl) && !picked && !uploading;
+      var hasVideo = uploading || picked || saved;
+
+      videoPreview.hidden = !hasVideo;
+      videoClearBtn.hidden = !hasVideo;
+      videoProgress.hidden = !uploading;
+      if (!uploading) videoProgressBar.style.width = '0%';
+      if (hasVideo) {
+        videoPreviewName.textContent = picked ? videoUploadState.file.name : fileName(project.videoUrl);
+        videoPreviewState.textContent = '· ' + (uploading ? 'uploading' : picked ? 'ready to upload' : 'uploaded');
+      }
+      videoChooseLabel.textContent = hasVideo ? 'Replace video' : 'Choose video';
+    }
+
+    videoChooseBtn.addEventListener('click', function () { videoFileInput.click(); });
 
     videoFileInput.addEventListener('change', function () {
       var file = this.files && this.files[0];
       if (!file) return;
-      // Store file for upload on "Add project" click - don't upload yet
+      // Store the file and upload on "Add project", never on file pick.
       videoUploadState = {
         status: 'selected',
         file: file,
@@ -1859,12 +1882,8 @@
         progress: 0,
         promise: null,
       };
-      videoPreview.style.display = '';
-      videoPreviewName.textContent = file.name;
-      videoProgress.style.display = 'none';
-      videoChooseBtn.disabled = false;
-      videoChooseBtn.textContent = 'Choose video';
-      videoClearBtn.disabled = false;
+      this.value = '';
+      renderVideo();
     });
 
     function clearVideoSelection() {
@@ -1879,17 +1898,11 @@
       };
       videoFileInput.value = '';
       project.videoUrl = '';
-      videoPreview.style.display = 'none';
-      videoPreviewName.textContent = '';
-      videoProgress.style.display = 'none';
-      videoProgressBar.style.width = '0%';
-      videoChooseBtn.disabled = false;
-      videoChooseBtn.textContent = 'Choose video';
-      videoClearBtn.disabled = false;
+      renderVideo();
     }
 
     videoClearBtn.addEventListener('click', clearVideoSelection);
-    videoRemoveBtn.addEventListener('click', clearVideoSelection);
+    renderVideo();
 
     dialog.querySelector('[data-add-gallery-url]').addEventListener('click', function () {
       project.gallery.push('');
@@ -2092,7 +2105,7 @@
       '<div class="panel-form section-block"><p class="panel-title">Portrait</p><p class="panel-sub" style="margin-bottom:12px">Used on the about page.</p>' +
       '<div class="image-field"><div class="image-drop"><img id="portraitImage" src="' + esc(assetUrl(profile.portrait)) + '" alt="Portrait preview"' + (profile.portrait ? '' : ' hidden') + '></div>' +
       '<div class="image-field-actions"><div class="row"><button class="btn btn-secondary btn-sm" type="button" data-portrait-choose>' + icon('upload') + 'Choose image</button>' +
-      '<button class="btn btn-ghost btn-sm" type="button" data-portrait-clear>Remove</button></div>' +
+      '<button class="btn btn-ghost btn-sm" type="button" data-portrait-clear' + (profile.portrait ? '' : ' hidden') + '>Remove</button></div>' +
       '<div class="field"><label for="portraitUrl">Image URL</label><input class="input" id="portraitUrl" type="text" value="' + esc(profile.portrait) + '" data-bind="profile.portrait" spellcheck="false"></div></div></div>' +
       '<input type="file" id="portraitFile" accept="image/*" hidden></div>' +
       '</section></div>';
@@ -2133,6 +2146,8 @@
       }
       var url = document.getElementById('portraitUrl');
       if (url && document.activeElement !== url) url.value = nextProfile.portrait;
+      var clear = document.querySelector('[data-portrait-clear]');
+      if (clear) clear.hidden = !nextProfile.portrait;
     };
   }
 
