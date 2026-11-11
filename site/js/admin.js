@@ -646,7 +646,9 @@
     });
   }
 
-  function uploadVideo(file, onProgress) {
+  var activeVideoUpload = null;
+
+  function uploadVideo(file, onProgress, onComplete) {
     if (!file) return Promise.reject(new Error('Choose a video file to upload.'));
     if (file.size > 500 * 1024 * 1024) {
       return Promise.reject(new Error('Choose a video smaller than 500 MB.'));
@@ -665,7 +667,6 @@
           return;
         }
         var signData = result.body;
-        // Update CSRF token so subsequent content saves don't get 403
         state.csrfToken = signData.csrfToken;
 
         // Step 2: Upload directly to Cloudinary (bypasses Netlify's 6 MB function limit)
@@ -689,7 +690,7 @@
           }
           try {
             var cloudBody = JSON.parse(xhr.responseText);
-            resolve({
+            var item = {
               id: cloudBody.public_id,
               key: cloudBody.public_id,
               filename: cloudBody.original_filename || file.name || 'video.mp4',
@@ -700,7 +701,9 @@
               size: cloudBody.bytes,
               format: cloudBody.format,
               createdAt: new Date().toISOString(),
-            });
+            };
+            activeVideoUpload.publicId = item.id;
+            resolve(item);
           } catch {
             reject(new Error('Could not parse upload response.'));
           }
@@ -717,10 +720,125 @@
         form.append('folder', signData.folder);
 
         xhr.send(form);
+
+        activeVideoUpload = {
+          xhr: xhr,
+          publicId: null,
+          abort: function () {
+            xhr.abort();
+            if (signData && signData.cloudName && activeVideoUpload.publicId) {
+              // Best-effort delete of orphaned upload
+              apiJson('/api/video-delete', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ public_id: activeVideoUpload.publicId }),
+              }).catch(function () {
+                // Ignore delete failures on abort
+              });
+            }
+          }
+        };
       }).catch(function (error) {
         reject(error);
       });
     });
+  }
+
+  function cancelActiveUpload() {
+    if (activeVideoUpload) {
+      activeVideoUpload.abort();
+      activeVideoUpload = null;
+    }
+  }
+
+  var videoUploadState = {
+    status: 'idle', // idle | uploading | done | error
+    file: null,
+    item: null,
+    error: null,
+    progress: 0,
+  };
+
+  function startVideoUpload(file) {
+    cancelActiveUpload();
+    videoUploadState = {
+      status: 'uploading',
+      file: file,
+      item: null,
+      error: null,
+      progress: 0,
+    };
+
+    var videoPreview = dialog.querySelector('#projectVideoPreview');
+    var videoPreviewName = dialog.querySelector('#projectVideoPreview .video-preview-name');
+    var videoProgress = dialog.querySelector('#videoProgress');
+    var videoProgressBar = dialog.querySelector('.video-progress-bar');
+    var videoChooseBtn = dialog.querySelector('#projectVideoChoose');
+    var videoClearBtn = dialog.querySelector('#projectVideoClear');
+
+    videoPreview.style.display = '';
+    videoPreviewName.textContent = file.name;
+    videoProgress.style.display = '';
+    videoProgressBar.style.width = '0%';
+    videoChooseBtn.disabled = true;
+    videoChooseBtn.textContent = 'Uploading…';
+    videoClearBtn.disabled = true;
+
+    uploadVideo(file, function (percent) {
+      videoUploadState.progress = percent;
+      if (videoProgressBar) videoProgressBar.style.width = percent + '%';
+    }).then(function (item) {
+      videoUploadState.status = 'done';
+      videoUploadState.item = item;
+      project.videoUrl = item.url;
+      videoPreviewName.textContent = item.filename;
+      videoChooseBtn.disabled = false;
+      videoChooseBtn.textContent = 'Choose video';
+      videoClearBtn.disabled = false;
+      toast('Image uploaded.', 'info');
+    }).catch(function (error) {
+      videoUploadState.status = 'error';
+      videoUploadState.error = error.message || 'Upload failed.';
+      videoChooseBtn.disabled = false;
+      videoChooseBtn.textContent = 'Choose video';
+      videoClearBtn.disabled = false;
+      videoProgress.style.display = 'none';
+      toast(error.message || 'Video upload failed.', 'error');
+    });
+  }
+
+  function cancelVideoUpload() {
+    cancelActiveUpload();
+    videoUploadState = {
+      status: 'idle',
+      file: null,
+      item: null,
+      error: null,
+      progress: 0,
+    };
+
+    var videoPreview = dialog.querySelector('#projectVideoPreview');
+    var videoProgress = dialog.querySelector('#videoProgress');
+    var videoProgressBar = dialog.querySelector('.video-progress-bar');
+    var videoChooseBtn = dialog.querySelector('#projectVideoChoose');
+    var videoClearBtn = dialog.querySelector('#projectVideoClear');
+
+    videoPreview.style.display = 'none';
+    videoProgress.style.display = 'none';
+    if (videoProgressBar) videoProgressBar.style.width = '0%';
+    videoChooseBtn.disabled = false;
+    videoChooseBtn.textContent = 'Choose video';
+    videoClearBtn.disabled = false;
+  }
+
+  function showPublishingOverlay() {
+    var overlay = document.getElementById('publishingOverlay');
+    if (overlay) overlay.classList.remove('hidden');
+  }
+
+  function hidePublishingOverlay() {
+    var overlay = document.getElementById('publishingOverlay');
+    if (overlay) overlay.classList.add('hidden');
   }
 
   function handleUploadError(error) {
@@ -1733,18 +1851,20 @@
     videoFileInput.addEventListener('change', function () {
       var file = this.files && this.files[0];
       if (!file) return;
-      videoPreview.style.display = '';
-      videoPreviewName.textContent = file.name;
-      project.videoUrl = file.name; // placeholder until upload completes
+      startVideoUpload(file);
     });
 
+    videoChooseBtn.addEventListener('click', function () { videoFileInput.click(); });
+
     videoClearBtn.addEventListener('click', function () {
+      cancelVideoUpload();
       videoFileInput.value = '';
       project.videoUrl = '';
       videoPreview.style.display = 'none';
     });
 
     videoRemoveBtn.addEventListener('click', function () {
+      cancelVideoUpload();
       videoFileInput.value = '';
       project.videoUrl = '';
       videoPreview.style.display = 'none';
@@ -1819,37 +1939,20 @@
       project.gallery = project.gallery.map(function (src) { return String(src).trim(); }).filter(Boolean);
       project.updatedAt = new Date().toISOString();
 
-      var videoFile = dialog.querySelector('#projectVideoFile').files && dialog.querySelector('#projectVideoFile').files[0];
-      var videoProgress = dialog.querySelector('#videoProgress');
-      var videoProgressBar = dialog.querySelector('.video-progress-bar');
-      if (videoFile) {
-        var videoBtn = dialog.querySelector('#projectVideoChoose');
-        videoBtn.disabled = true;
-        videoBtn.textContent = 'Uploading…';
-        videoProgress.style.display = '';
+      // If upload is still in progress, close modal and show publishing overlay
+      if (videoUploadState.status === 'uploading') {
+        dialog.close();
+        dialog.remove();
+        showPublishingOverlay();
         try {
-          var item = await uploadVideo(videoFile, function (percent) {
-            if (videoProgressBar) videoProgressBar.style.width = percent + '%';
-          });
-          project.videoUrl = item.url;
-          dialog.querySelector('#projectVideoPreview').style.display = '';
-          dialog.querySelector('#projectVideoPreview .video-preview-name').textContent = item.filename;
+          await videoUploadState.uploadPromise;
+          project.videoUrl = videoUploadState.item.url;
         } catch (error) {
+          hidePublishingOverlay();
           toast(error.message || 'Video upload failed.', 'error');
-          videoBtn.disabled = false;
-          videoBtn.textContent = 'Choose video';
-          videoProgress.style.display = 'none';
-          if (videoProgressBar) videoProgressBar.style.width = '0%';
           return;
-        } finally {
-          videoBtn.disabled = false;
-          videoBtn.textContent = 'Choose video';
-          videoProgress.style.display = 'none';
-          if (videoProgressBar) videoProgressBar.style.width = '0%';
         }
-      }
-
-      if (project.type === 'video' && !project.videoUrl) {
+      } else if (project.type === 'video' && !project.videoUrl) {
         toast('Upload a video file so the lightbox has something to open.', 'error');
         dialog.querySelector('#projectVideoChoose').focus();
         return;
@@ -1866,6 +1969,10 @@
         }
       }
 
+      if (videoUploadState.status === 'uploading') {
+        showPublishingOverlay();
+      }
+
       if (isEdit) {
         saveData(function (data) {
           var index = data.projects.findIndex(function (item) { return item.id === project.id; });
@@ -1879,6 +1986,7 @@
 
       await flushSave();
 
+      hidePublishingOverlay();
       dialog.close();
       dialog.remove();
       if (state.route === 'portfolio') refreshProjectTable();

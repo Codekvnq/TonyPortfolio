@@ -412,6 +412,88 @@ export function createApiHandler({
     });
   }
 
+  async function handleVideoDelete(req, db) {
+    const session = await requireSession(req, db);
+    if (!session) return json({ error: "Sign in to continue." }, 401);
+
+    const cloudUrl = process.env.CLOUDINARY_URL;
+    let cloudName, apiKey, apiSecret;
+    if (cloudUrl) {
+      const trimmed = cloudUrl.trim();
+      const match = trimmed.match(/^cloudinary:\/\/([^:]+):([^@]+)@(.+)$/);
+      if (match) {
+        apiKey = match[1].trim();
+        apiSecret = match[2].trim();
+        cloudName = match[3].trim();
+      }
+    } else {
+      cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+      apiKey = process.env.CLOUDINARY_API_KEY;
+      apiSecret = process.env.CLOUDINARY_API_SECRET;
+    }
+
+    if (!cloudName || !apiKey || !apiSecret) {
+      return json(
+        { error: "Video upload is not configured on the server. Missing Cloudinary credentials." },
+        500,
+      );
+    }
+
+    const contentType = req.headers.get("content-type") || "";
+    if (!contentType.toLowerCase().includes("application/json")) {
+      return json({ error: "Expected JSON body." }, 415);
+    }
+
+    let body;
+    try {
+      body = await req.json();
+    } catch {
+      return json({ error: "Could not read request body." }, 400);
+    }
+
+    const { public_id, resource_type = "video" } = body;
+    if (!public_id) {
+      return json({ error: "public_id is required." }, 400);
+    }
+
+    const timestamp = Math.floor(Date.now() / 1000);
+    // Cloudinary signature: include ALL params except 'file', 'api_key', 'resource_type', 'signature'
+    const signatureString = `public_id=${public_id}&timestamp=${timestamp}${apiSecret}`;
+    const signature = createHash("sha1")
+      .update(signatureString)
+      .digest("hex");
+
+    let deleteResponse;
+    try {
+      deleteResponse = await fetch(
+        `https://api.cloudinary.com/v1_1/${cloudName}/image/destroy`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            public_id,
+            resource_type,
+            api_key: apiKey,
+            timestamp,
+            signature,
+          }),
+        },
+      );
+    } catch {
+      return json({ error: "Could not reach Cloudinary. Try again later." }, 502);
+    }
+
+    const deleteBody = await deleteResponse.json().catch(() => ({}));
+    if (!deleteResponse.ok) {
+      return json(
+        { error: deleteBody.error || "Cloudinary delete failed." },
+        deleteResponse.status >= 500 ? 502 : 400,
+      );
+    }
+
+    return json({ ok: true, deleted: deleteBody.deleted === true, public_id });
+  }
+
   function throttleKey(req) {
     return `throttle/${hashIdentifier(clientIp(req))}`;
   }
@@ -762,6 +844,9 @@ export function createApiHandler({
       }
       if (req.method === "POST" && path === "/api/video-sign") {
         return await handleVideoSign(req, db);
+      }
+      if (req.method === "POST" && path === "/api/video-delete") {
+        return await handleVideoDelete(req, db);
       }
       const mediaMatch = /^\/api\/media\/([^/]+)$/.exec(path);
       if (req.method === "DELETE" && mediaMatch) {
