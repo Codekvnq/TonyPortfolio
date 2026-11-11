@@ -664,6 +664,8 @@
           return;
         }
         var signData = result.body;
+        // Update CSRF token so subsequent content saves don't get 403
+        state.csrfToken = signData.csrfToken;
 
         // Step 2: Upload directly to Cloudinary (bypasses Netlify's 6 MB function limit)
         var xhr = new XMLHttpRequest();
