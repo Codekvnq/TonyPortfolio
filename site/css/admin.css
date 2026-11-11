@@ -2776,23 +2776,35 @@ select.select-inline {
    Toast
    -------------------------------------------------------------------------- */
 
+/* The toast region is a manual popover so it can sit in the top layer above
+   <dialog> modals, which beat any z-index. The UA popover stylesheet gives it
+   inset: 0, margin: auto, a solid border, padding and a canvas background, so
+   every one of those has to be reset here or an empty region shows up as a
+   small bordered box in the middle of the screen. */
 .toast-region {
   position: fixed;
-  right: 22px;
-  bottom: 22px;
-  z-index: 2147483647;
-  display: grid;
-  gap: 8px;
+  inset: auto 22px 22px auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
   width: min(340px, calc(100vw - 32px));
+  max-height: none;
+  overflow: visible;
+  display: none;
+  gap: 8px;
   pointer-events: none;
+  z-index: 2147483647;
+}
+
+.toast-region.is-open {
+  display: grid;
 }
 
 .toast-region[popover] {
-  position: fixed;
-  right: 22px;
-  bottom: 22px;
-  z-index: auto;
-  width: min(340px, calc(100vw - 32px));
+  inset: auto 22px 22px auto;
+  margin: 0;
 }
 
 .toast {
@@ -2849,6 +2861,10 @@ select.select-inline {
 }
 
 /* Publishing overlay */
+.publishing-overlay.hidden {
+  display: none;
+}
+
 .publishing-overlay {
   position: fixed;
   inset: 0;
@@ -2901,10 +2917,6 @@ select.select-inline {
 .publishing-percent {
   font-size: 13px;
   color: rgba(255, 255, 255, 0.7);
-}
-
-.publishing-overlay.hidden {
-  display: none;
 }
 
 .admin-footer {
@@ -3180,8 +3192,7 @@ select.select-inline {
   }
 
   .toast-region {
-    right: 14px;
-    bottom: 14px;
+    inset: auto 14px 14px auto;
   }
 
   .dialog-body {

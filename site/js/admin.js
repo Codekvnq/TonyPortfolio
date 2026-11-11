@@ -50,6 +50,7 @@
   var saveTimer = null;
   var savingNow = false;
   var savePending = false;
+  var saveWaiters = [];
 
   /* ------------------------------------------------------------------------
      Icons
@@ -295,12 +296,26 @@
     node.className = 'toast' + (tone ? ' ' + tone : '');
     node.innerHTML = icon(tone === 'error' ? 'alert' : tone === 'info' ? 'info' : 'check') + '<span>' + esc(message) + '</span>';
     toastRegion.appendChild(node);
-    toastRegion.showPopover();
+    toastRegion.classList.add('is-open');
+    // Re-showing the popover moves it to the end of the top layer, so a toast
+    // added while a <dialog> is open still paints above that dialog.
+    try {
+      if (toastRegion.matches(':popover-open')) toastRegion.hidePopover();
+      toastRegion.showPopover();
+    } catch (error) {
+      // Popover API unavailable; .is-open still renders the toasts.
+    }
     window.setTimeout(function () {
       node.style.opacity = '0';
       node.style.transform = 'translateY(4px)';
       node.style.transition = 'opacity 140ms ease, transform 140ms ease';
-      window.setTimeout(function () { node.remove(); }, 160);
+      window.setTimeout(function () {
+        node.remove();
+        if (!toastRegion.children.length) {
+          toastRegion.classList.remove('is-open');
+          try { toastRegion.hidePopover(); } catch (error) { /* already closed */ }
+        }
+      }, 160);
     }, 2800);
   }
 
@@ -346,14 +361,15 @@
     saveTimer = null;
     if (savingNow) {
       savePending = true;
-      return Promise.resolve();
+      return new Promise(function (resolve) { saveWaiters.push(resolve); });
     }
-    if (!state.data) return Promise.resolve();
+    if (!state.data) return Promise.resolve(false);
 
     savingNow = true;
     setSaveState('saving');
     var payload = JSON.parse(JSON.stringify(state.data));
 
+    var saved = false;
     return Store.save(payload).then(function (result) {
       if (result.unauthorized) {
         expireSession('Your session expired. Sign in again.');
@@ -371,6 +387,7 @@
         state.data = result.data;
         state.snapshot = JSON.parse(JSON.stringify(result.data));
       }
+      saved = true;
       setSaveState('saved');
       updateDraftBadge();
       renderNotifications(state.data);
@@ -383,7 +400,12 @@
       if (savePending) {
         savePending = false;
         saveTimer = window.setTimeout(flushSave, 250);
+      } else {
+        var waiters = saveWaiters;
+        saveWaiters = [];
+        waiters.forEach(function (resolve) { resolve(saved); });
       }
+      return saved;
     });
   }
 
@@ -401,7 +423,15 @@
 
     updateDraftBadge();
     if (state.refreshPreview) state.refreshPreview(next);
-    if (opts.toast) toast(opts.toast);
+
+    if (opts.toast) {
+      // Only report success once the server has actually stored the change.
+      return flushSave().then(function (ok) {
+        if (ok) toast(opts.toast);
+        return next;
+      });
+    }
+
     queueSave(opts.immediate ? 0 : 650);
     return Promise.resolve(next);
   }
@@ -447,9 +477,8 @@
     }
 
     if (action === 'save') {
-      var saved = state.data;
-      state.data = saved;
-      flushSave().then(function () {
+      flushSave().then(function (saved) {
+        if (!saved) return; // the error / expired-session path already reported it
         state.editing = false;
         state.data = Store.get();
         state.snapshot = JSON.parse(JSON.stringify(state.data));
@@ -534,11 +563,15 @@
 
   function openDialog(dialog) {
     Array.prototype.forEach.call(dialogRoot.querySelectorAll('dialog'), function (existing) {
-      if (!existing.open) existing.remove();
+      if (!existing.open && !existing.dataset.keep) existing.remove();
     });
     dialogRoot.appendChild(dialog);
     dialog.addEventListener('close', function () {
-      if (!dialog.keep) dialog.remove();
+      // Let a form that is only hidden during publishing be reopened: by the
+      // time this runs the dialog is either marked to keep or already open.
+      window.setTimeout(function () {
+        if (!dialog.dataset.keep && !dialog.open && dialog.isConnected) dialog.remove();
+      }, 0);
     });
     dialog.showModal();
     return dialog;
@@ -660,16 +693,15 @@
       // Step 1: Get a signed upload URL from Netlify Functions
       apiJson('/api/video-sign', { method: 'POST', cache: 'no-store' }).then(function (result) {
         if (!result.response.ok) {
-          try {
-            var body = JSON.parse(result.responseText);
-            reject(new Error(body.error || 'Could not get upload signature.'));
-          } catch {
-            reject(new Error('Could not get upload signature.'));
-          }
+          var signError = (result.body && result.body.error) || 'Could not get upload signature.';
+          var signFailure = new Error(signError);
+          if (result.response.status === 401) signFailure.unauthorized = true;
+          reject(signFailure);
           return;
         }
         var signData = result.body;
         state.csrfToken = signData.csrfToken;
+        Store.setCsrfToken(signData.csrfToken);
 
         // Step 2: Upload directly to Cloudinary (bypasses Netlify's 6 MB function limit)
         var xhr = new XMLHttpRequest();
@@ -762,90 +794,28 @@
     promise: null, // upload promise for awaiting in submit handler
   };
 
-  function startVideoUpload(file) {
-    cancelActiveUpload();
-    videoUploadState = {
-      status: 'uploading',
-      file: file,
-      item: null,
-      error: null,
-      progress: 0,
-      promise: null,
-    };
-
-    var videoPreview = dialog.querySelector('#projectVideoPreview');
-    var videoPreviewName = dialog.querySelector('#projectVideoPreview .video-preview-name');
-    var videoProgress = dialog.querySelector('#videoProgress');
-    var videoProgressBar = dialog.querySelector('.video-progress-bar');
-    var videoChooseBtn = dialog.querySelector('#projectVideoChoose');
-    var videoClearBtn = dialog.querySelector('#projectVideoClear');
-
-    videoPreview.style.display = '';
-    videoPreviewName.textContent = file.name;
-    videoProgress.style.display = '';
-    videoProgressBar.style.width = '0%';
-    videoChooseBtn.disabled = true;
-    videoChooseBtn.textContent = 'Uploading…';
-    videoClearBtn.disabled = true;
-
-    var uploadPromise = uploadVideo(file, function (percent) {
-      videoUploadState.progress = percent;
-      if (videoProgressBar) videoProgressBar.style.width = percent + '%';
-    }).then(function (item) {
-      videoUploadState.status = 'done';
-      videoUploadState.item = item;
-      project.videoUrl = item.url;
-      videoPreviewName.textContent = item.filename;
-      videoChooseBtn.disabled = false;
-      videoChooseBtn.textContent = 'Choose video';
-      videoClearBtn.disabled = false;
-      toast('Image uploaded.', 'info');
-    }).catch(function (error) {
-      videoUploadState.status = 'error';
-      videoUploadState.error = error.message || 'Upload failed.';
-      videoChooseBtn.disabled = false;
-      videoChooseBtn.textContent = 'Choose video';
-      videoClearBtn.disabled = false;
-      videoProgress.style.display = 'none';
-      toast(error.message || 'Video upload failed.', 'error');
-    });
-
-    videoUploadState.promise = uploadPromise;
-    return uploadPromise;
-  }
-
-  function cancelVideoUpload() {
-    cancelActiveUpload();
-    videoUploadState = {
-      status: 'idle',
-      file: null,
-      item: null,
-      error: null,
-      progress: 0,
-    };
-
-    var videoPreview = dialog.querySelector('#projectVideoPreview');
-    var videoProgress = dialog.querySelector('#videoProgress');
-    var videoProgressBar = dialog.querySelector('.video-progress-bar');
-    var videoChooseBtn = dialog.querySelector('#projectVideoChoose');
-    var videoClearBtn = dialog.querySelector('#projectVideoClear');
-
-    videoPreview.style.display = 'none';
-    videoProgress.style.display = 'none';
-    if (videoProgressBar) videoProgressBar.style.width = '0%';
-    videoChooseBtn.disabled = false;
-    videoChooseBtn.textContent = 'Choose video';
-    videoClearBtn.disabled = false;
-  }
-
   function showPublishingOverlay() {
     var overlay = document.getElementById('publishingOverlay');
-    if (overlay) overlay.classList.remove('hidden');
+    if (!overlay) return;
+    var label = overlay.querySelector('.publishing-text');
+    if (label) label.textContent = 'Publishing…';
+    overlay.classList.remove('hidden');
+  }
+
+  function setPublishingProgress(percent) {
+    var overlay = document.getElementById('publishingOverlay');
+    if (!overlay) return;
+    var value = Math.max(0, Math.min(100, Math.round(percent || 0)));
+    var bar = overlay.querySelector('.publishing-progress-bar');
+    var label = overlay.querySelector('.publishing-percent');
+    if (bar) bar.style.width = value + '%';
+    if (label) label.textContent = value + '%';
   }
 
   function hidePublishingOverlay() {
     var overlay = document.getElementById('publishingOverlay');
     if (overlay) overlay.classList.add('hidden');
+    setPublishingProgress(0);
   }
 
   function handleUploadError(error) {
@@ -883,11 +853,17 @@
      ------------------------------------------------------------------------ */
 
   var sessionCheckInterval = null;
+  var sessionCheckHandler = null;
 
   function checkSessionValidity() {
-    if (!state.session) return;
+    if (!state.session) return Promise.resolve();
     return apiJson('/api/session', { cache: 'no-store' }).then(function (result) {
-      if (!result.response.ok || !result.body || !result.body.authenticated) {
+      if (!result.response.ok) {
+        // A 5xx is the server having a bad moment, not a signed-out session.
+        // Keep the admin usable and check again on the next tick.
+        return;
+      }
+      if (!result.body || !result.body.authenticated) {
         expireSession('Your session expired. Sign in again.');
       }
     }).catch(function () {
@@ -897,9 +873,11 @@
 
   function startSessionValidityCheck() {
     stopSessionValidityCheck();
-    sessionCheckInterval = window.setInterval(checkSessionValidity, 30000);
+    // Kept short so signing in on another device closes this one promptly.
+    sessionCheckInterval = window.setInterval(checkSessionValidity, 15000);
+    sessionCheckHandler = function () { checkSessionValidity(); };
     ['click', 'keydown', 'scroll'].forEach(function (evt) {
-      document.addEventListener(evt, checkSessionValidity, { passive: true });
+      document.addEventListener(evt, sessionCheckHandler, { passive: true });
     });
   }
 
@@ -907,6 +885,12 @@
     if (sessionCheckInterval) {
       window.clearInterval(sessionCheckInterval);
       sessionCheckInterval = null;
+    }
+    if (sessionCheckHandler) {
+      ['click', 'keydown', 'scroll'].forEach(function (evt) {
+        document.removeEventListener(evt, sessionCheckHandler);
+      });
+      sessionCheckHandler = null;
     }
   }
 
@@ -1851,9 +1835,9 @@
     var videoClearBtn = dialog.querySelector('#projectVideoClear');
     var videoPreview = dialog.querySelector('#projectVideoPreview');
     var videoPreviewName = dialog.querySelector('#projectVideoPreview .video-preview-name');
+    var videoProgress = dialog.querySelector('#videoProgress');
+    var videoProgressBar = dialog.querySelector('.video-progress-bar');
     var videoRemoveBtn = dialog.querySelector('#projectVideoRemove');
-
-    videoChooseBtn.addEventListener('click', function () { videoFileInput.click(); });
 
     videoFileInput.addEventListener('change', function () {
       var file = this.files && this.files[0];
@@ -1875,21 +1859,29 @@
       videoClearBtn.disabled = false;
     });
 
-    videoChooseBtn.addEventListener('click', function () { videoFileInput.click(); });
-
-    videoClearBtn.addEventListener('click', function () {
-      cancelVideoUpload();
+    function clearVideoSelection() {
+      cancelActiveUpload();
+      videoUploadState = {
+        status: 'idle',
+        file: null,
+        item: null,
+        error: null,
+        progress: 0,
+        promise: null,
+      };
       videoFileInput.value = '';
       project.videoUrl = '';
       videoPreview.style.display = 'none';
-    });
+      videoPreviewName.textContent = '';
+      videoProgress.style.display = 'none';
+      videoProgressBar.style.width = '0%';
+      videoChooseBtn.disabled = false;
+      videoChooseBtn.textContent = 'Choose video';
+      videoClearBtn.disabled = false;
+    }
 
-    videoRemoveBtn.addEventListener('click', function () {
-      cancelVideoUpload();
-      videoFileInput.value = '';
-      project.videoUrl = '';
-      videoPreview.style.display = 'none';
-    });
+    videoClearBtn.addEventListener('click', clearVideoSelection);
+    videoRemoveBtn.addEventListener('click', clearVideoSelection);
 
     dialog.querySelector('[data-add-gallery-url]').addEventListener('click', function () {
       project.gallery.push('');
@@ -1960,85 +1952,103 @@
       project.gallery = project.gallery.map(function (src) { return String(src).trim(); }).filter(Boolean);
       project.updatedAt = new Date().toISOString();
 
-      // If upload is in progress, close modal and show publishing overlay
-      if (videoUploadState.status === 'uploading') {
-        dialog.close();
-        dialog.remove();
-        showPublishingOverlay();
-        try {
-          await videoUploadState.promise;
-          project.videoUrl = videoUploadState.item.url;
-        } catch (error) {
-          hidePublishingOverlay();
-          toast(error.message || 'Video upload failed.', 'error');
-          return;
-        }
-      } else if (videoUploadState.status === 'selected') {
-        // File selected but not uploaded yet - start upload now
-        dialog.close();
-        dialog.remove();
-        showPublishingOverlay();
-        try {
+      // Hide the form (not remove it) while publishing, so nothing the user typed is lost
+      // if the upload or the save fails.
+      function hideForm() {
+        dialog.dataset.keep = '1';
+        if (dialog.open) dialog.close();
+      }
+      function restoreForm() {
+        hidePublishingOverlay();
+        if (!state.session) return; // signed out meanwhile; the login screen takes over
+        delete dialog.dataset.keep;
+        if (!dialog.open) dialog.showModal();
+      }
+
+      var publishText = document.querySelector('#publishingOverlay .publishing-text');
+      function setPublishText(text) {
+        if (publishText) publishText.textContent = text;
+      }
+      var published = false;
+
+      try {
+        if (videoUploadState.status === 'selected') {
+          hideForm();
+          showPublishingOverlay();
+          setPublishText('Uploading…');
+          setPublishingProgress(0);
           var item = await uploadVideo(videoUploadState.file, function (percent) {
-            // Progress updates handled by overlay
+            setPublishingProgress(percent);
+            if (percent >= 100) setPublishText('Processing…');
           });
           project.videoUrl = item.url;
           videoUploadState.status = 'done';
           videoUploadState.item = item;
-        } catch (error) {
-          hidePublishingOverlay();
-          toast(error.message || 'Video upload failed.', 'error');
+        } else if (project.type === 'video' && !project.videoUrl) {
+          toast('Upload a video file so the lightbox has something to open.', 'error');
+          dialog.querySelector('#projectVideoChoose').focus();
           return;
         }
-      } else if (project.type === 'video' && !project.videoUrl) {
-        toast('Upload a video file so the lightbox has something to open.', 'error');
-        dialog.querySelector('#projectVideoChoose').focus();
-        return;
-      }
 
-      // Duplicate detection: same video URL already used by another project
-      if (project.videoUrl) {
-        var existing = state.data.projects.find(function (p) {
-          return p.id !== project.id && p.videoUrl === project.videoUrl;
-        });
-        if (existing) {
-          toast('This video is already used by another project ("' + esc(existing.title) + '").', 'error');
-          return;
+        // Duplicate detection: same video URL already used by another project
+        if (project.videoUrl) {
+          var existingUse = state.data.projects.find(function (p) {
+            return p.id !== project.id && p.videoUrl === project.videoUrl;
+          });
+          if (existingUse) {
+            restoreForm();
+            toast('This video is already used by another project ("' + existingUse.title + '").', 'error');
+            return;
+          }
         }
-      }
 
-      if (videoUploadState.status === 'uploading') {
+        // Save to the server, then report the real result.
+        hideForm();
         showPublishingOverlay();
-      }
+        setPublishText('Saving…');
+        setPublishingProgress(100);
 
-      var index = data.projects.findIndex(function (item) { return item.id === project.id; });
-      if (isEdit && index !== -1) {
-        data.projects[index] = project;
-      } else {
-        data.projects.unshift(project);
-      }
-
-      try {
-        await flushSave();
-      } catch (error) {
-        // Rollback: remove the project we just added/modified
-        if (isEdit && index !== -1) {
-          data.projects.splice(index, 1);
+        if (isEdit) {
+          saveData(function (data) {
+            var index = data.projects.findIndex(function (entry) { return entry.id === project.id; });
+            if (index !== -1) data.projects[index] = project;
+          });
         } else {
-          data.projects.pop();
+          saveData(function (data) {
+            data.projects.unshift(project);
+          });
         }
-        hidePublishingOverlay();
-        dialog.close();
-        dialog.remove();
-        toast(error.message || 'Save failed. Please try again.', 'error');
-        return;
-      }
 
-      hidePublishingOverlay();
-      dialog.close();
-      dialog.remove();
-      if (state.route === 'portfolio') refreshProjectTable();
-      else if (state.route === 'overview') renderRoute();
+        var projectSaved = await flushSave();
+
+        if (!projectSaved) {
+          // Roll the unsaved project back out of local data so a retry cannot duplicate it
+          if (!isEdit && state.data && state.data.projects) {
+            state.data.projects = state.data.projects.filter(function (p) { return p.id !== project.id; });
+            updateDraftBadge();
+            if (state.refreshPreview) state.refreshPreview(state.data);
+          }
+          restoreForm();
+          return;
+        }
+
+        published = true;
+        toast(isEdit ? 'Project updated.' : 'Project added to the portfolio.');
+        if (state.route === 'portfolio') refreshProjectTable();
+        else if (state.route === 'overview') renderRoute();
+      } catch (error) {
+        restoreForm();
+        toast((error && error.message) || 'Could not publish the project.', 'error');
+      } finally {
+        hidePublishingOverlay();
+        setPublishText('Publishing…');
+        setPublishingProgress(0);
+        if (published) {
+          delete dialog.dataset.keep;
+          if (dialog.open) dialog.close();
+          dialog.remove();
+        }
+      }
     });
 
     window.setTimeout(function () { dialog.querySelector('#projectTitle').focus(); }, 40);

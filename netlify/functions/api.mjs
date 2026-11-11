@@ -135,6 +135,15 @@ export function createApiHandler({
     throw new Error("Could not initialise the session secret.");
   }
 
+  // One owner, one active session: rotating the signing secret on every
+  // successful sign-in instantly invalidates every token issued to an older
+  // device, so the previous device is signed out instead of living on.
+  async function rotateSecret(db) {
+    const secret = makeSessionSecret();
+    await db.set(SECRET_KEY, secret);
+    return secret;
+  }
+
   async function readSession(req, db) {
     const cookies = parseCookies(req.headers.get("cookie") || "");
     const token = cookies[SESSION_COOKIE];
@@ -579,7 +588,7 @@ export function createApiHandler({
     await db.delete(key).catch(() => {});
     const remember = body.value.remember === true;
     const ttl = remember ? REMEMBER_TTL_SECONDS : SESSION_TTL_SECONDS;
-    const secret = await loadSecret(db);
+    const secret = await rotateSecret(db);
     const csrfToken = makeCsrfToken();
     try {
       await db.set("csrf-token", csrfToken, { onlyIfNew: false });

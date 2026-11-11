@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { signSession } from "../netlify/lib/auth.mjs";
 import {
   call,
@@ -253,4 +254,65 @@ test("unknown routes return 404 and ping reports readiness", async () => {
 
   const missing = await call(handler, "GET", "/api/nope");
   assert.equal(missing.status, 404);
+});
+
+test("signing in on another device signs the previous session out", async () => {
+  const handler = makeHandler(memoryStore());
+
+  const first = await loginWithCsrf(handler);
+  const stillValid = await call(handler, "GET", "/api/session", { cookie: first.cookie });
+  assert.equal((await stillValid.json()).authenticated, true);
+
+  const second = await loginWithCsrf(handler);
+
+  const oldDevice = await call(handler, "GET", "/api/session", { cookie: first.cookie });
+  assert.deepEqual(await oldDevice.json(), { authenticated: false });
+
+  const newDevice = await call(handler, "GET", "/api/session", { cookie: second.cookie });
+  assert.equal((await newDevice.json()).authenticated, true);
+});
+
+test("video signing returns a Cloudinary SHA-1 signature", async () => {
+  const handler = makeHandler(memoryStore());
+  const { cookie, csrfToken } = await loginWithCsrf(handler);
+  const previous = process.env.CLOUDINARY_URL;
+  process.env.CLOUDINARY_URL = "cloudinary://123456789:secret-key@demo-cloud";
+
+  try {
+    const response = await callWithCsrf(handler, "POST", "/api/video-sign", {
+      cookie,
+      csrfToken,
+      body: {},
+    });
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    const expected = createHash("sha1")
+      .update(`folder=portfolio&timestamp=${body.timestamp}secret-key`)
+      .digest("hex");
+    assert.equal(body.signature, expected);
+    assert.equal(body.apiKey, "123456789");
+    assert.equal(body.uploadUrl, "https://api.cloudinary.com/v1_1/demo-cloud/video/upload");
+  } finally {
+    if (previous === undefined) delete process.env.CLOUDINARY_URL;
+    else process.env.CLOUDINARY_URL = previous;
+  }
+});
+
+test("video signing refuses to run without Cloudinary credentials", async () => {
+  const handler = makeHandler(memoryStore());
+  const { cookie, csrfToken } = await loginWithCsrf(handler);
+  const previous = process.env.CLOUDINARY_URL;
+  delete process.env.CLOUDINARY_URL;
+
+  try {
+    const response = await callWithCsrf(handler, "POST", "/api/video-sign", {
+      cookie,
+      csrfToken,
+      body: {},
+    });
+    assert.equal(response.status, 500);
+    assert.match((await response.json()).error, /not configured/i);
+  } finally {
+    if (previous !== undefined) process.env.CLOUDINARY_URL = previous;
+  }
 });
