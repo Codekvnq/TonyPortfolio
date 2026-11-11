@@ -757,6 +757,7 @@
     item: null,
     error: null,
     progress: 0,
+    promise: null, // upload promise for awaiting in submit handler
   };
 
   function startVideoUpload(file) {
@@ -767,6 +768,7 @@
       item: null,
       error: null,
       progress: 0,
+      promise: null,
     };
 
     var videoPreview = dialog.querySelector('#projectVideoPreview');
@@ -784,7 +786,7 @@
     videoChooseBtn.textContent = 'Uploading…';
     videoClearBtn.disabled = true;
 
-    uploadVideo(file, function (percent) {
+    var uploadPromise = uploadVideo(file, function (percent) {
       videoUploadState.progress = percent;
       if (videoProgressBar) videoProgressBar.style.width = percent + '%';
     }).then(function (item) {
@@ -805,6 +807,9 @@
       videoProgress.style.display = 'none';
       toast(error.message || 'Video upload failed.', 'error');
     });
+
+    videoUploadState.promise = uploadPromise;
+    return uploadPromise;
   }
 
   function cancelVideoUpload() {
@@ -1851,7 +1856,21 @@
     videoFileInput.addEventListener('change', function () {
       var file = this.files && this.files[0];
       if (!file) return;
-      startVideoUpload(file);
+      // Store file for upload on "Add project" click - don't upload yet
+      videoUploadState = {
+        status: 'selected',
+        file: file,
+        item: null,
+        error: null,
+        progress: 0,
+        promise: null,
+      };
+      videoPreview.style.display = '';
+      videoPreviewName.textContent = file.name;
+      videoProgress.style.display = 'none';
+      videoChooseBtn.disabled = false;
+      videoChooseBtn.textContent = 'Choose video';
+      videoClearBtn.disabled = false;
     });
 
     videoChooseBtn.addEventListener('click', function () { videoFileInput.click(); });
@@ -1939,14 +1958,31 @@
       project.gallery = project.gallery.map(function (src) { return String(src).trim(); }).filter(Boolean);
       project.updatedAt = new Date().toISOString();
 
-      // If upload is still in progress, close modal and show publishing overlay
+      // If upload is in progress, close modal and show publishing overlay
       if (videoUploadState.status === 'uploading') {
         dialog.close();
         dialog.remove();
         showPublishingOverlay();
         try {
-          await videoUploadState.uploadPromise;
+          await videoUploadState.promise;
           project.videoUrl = videoUploadState.item.url;
+        } catch (error) {
+          hidePublishingOverlay();
+          toast(error.message || 'Video upload failed.', 'error');
+          return;
+        }
+      } else if (videoUploadState.status === 'selected') {
+        // File selected but not uploaded yet - start upload now
+        dialog.close();
+        dialog.remove();
+        showPublishingOverlay();
+        try {
+          var item = await uploadVideo(videoUploadState.file, function (percent) {
+            // Progress updates handled by overlay
+          });
+          project.videoUrl = item.url;
+          videoUploadState.status = 'done';
+          videoUploadState.item = item;
         } catch (error) {
           hidePublishingOverlay();
           toast(error.message || 'Video upload failed.', 'error');
