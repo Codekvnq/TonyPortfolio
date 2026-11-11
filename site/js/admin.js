@@ -700,8 +700,13 @@
           return;
         }
         var signData = result.body;
-        state.csrfToken = signData.csrfToken;
-        Store.setCsrfToken(signData.csrfToken);
+        // The sign endpoint does not rotate the token, so only adopt one if the
+        // server actually sent it; otherwise a video upload would wipe a valid
+        // CSRF token and the following save would be refused.
+        if (signData.csrfToken) {
+          state.csrfToken = signData.csrfToken;
+          Store.setCsrfToken(signData.csrfToken);
+        }
 
         // Step 2: Upload directly to Cloudinary (bypasses Netlify's 6 MB function limit)
         var xhr = new XMLHttpRequest();

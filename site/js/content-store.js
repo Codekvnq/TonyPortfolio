@@ -414,9 +414,11 @@
   var csrfToken = null;
 
   function fetchCsrfToken() {
+    // Must be a GET: /api/csrf is exempt from the CSRF check as a GET, but a
+    // POST would be rejected before it could hand back a fresh token.
     return apiFetch(API.replace('/content', '/csrf'), {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', accept: 'application/json' }
+      method: 'GET',
+      headers: { accept: 'application/json' }
     }).then(function (response) {
       return response.json();
     }).then(function (payload) {
