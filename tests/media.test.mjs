@@ -261,3 +261,147 @@ test("CV upload stores a PDF and serves it with correct content type", async () 
   );
   assert.equal(rejected.status, 415);
 });
+
+test("removing an image from the content deletes the stored file", async () => {
+  const store = memoryStore();
+  const { handler, cookie, csrfToken } = await signedIn(store);
+  const uploaded = await (await upload(handler, cookie, csrfToken)).json();
+
+  const withImage = sampleContent({});
+  withImage.projects[0].cover = "/" + uploaded.item.key;
+  const first = await call(handler, "PUT", "/api/content", {
+    cookie,
+    headers: { "x-csrf-token": csrfToken },
+    body: { content: withImage, baseVersion: 0 },
+  });
+  assert.equal(first.status, 200);
+  assert.ok(store.values.has(uploaded.item.key));
+
+  const without = sampleContent({});
+  without.projects[0].cover = "";
+  const second = await call(handler, "PUT", "/api/content", {
+    cookie,
+    headers: { "x-csrf-token": csrfToken },
+    body: { content: without, baseVersion: (await first.json()).version },
+  });
+  assert.equal(second.status, 200);
+
+  // The project is gone, so the image it used is gone from storage too.
+  assert.equal(store.values.has(uploaded.item.key), false);
+  assert.equal(store.values.has(uploaded.item.thumbKey), false);
+  assert.equal(store.values.get(INDEX_KEY).items.length, 0);
+});
+
+test("an image still used by another project survives a save", async () => {
+  const store = memoryStore();
+  const { handler, cookie, csrfToken } = await signedIn(store);
+  const uploaded = await (await upload(handler, cookie, csrfToken)).json();
+
+  const content = sampleContent({});
+  content.projects[0].cover = "/" + uploaded.item.key;
+  content.projects[0].gallery = ["/" + uploaded.item.key];
+  const first = await call(handler, "PUT", "/api/content", {
+    cookie,
+    headers: { "x-csrf-token": csrfToken },
+    body: { content, baseVersion: 0 },
+  });
+  assert.equal(first.status, 200);
+
+  const next = structuredClone(content);
+  next.projects[0].cover = "";
+  const second = await call(handler, "PUT", "/api/content", {
+    cookie,
+    headers: { "x-csrf-token": csrfToken },
+    body: { content: next, baseVersion: (await first.json()).version },
+  });
+  assert.equal(second.status, 200);
+  assert.ok(store.values.has(uploaded.item.key));
+});
+
+test("deleting a project removes its Cloudinary video through the video endpoint", async () => {
+  const previous = process.env.CLOUDINARY_URL;
+  process.env.CLOUDINARY_URL = "cloudinary://123456789:test-secret@demo-cloud";
+  const realFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), init });
+    return new Response(JSON.stringify({ result: "ok" }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  try {
+    const store = memoryStore();
+    const { handler, cookie, csrfToken } = await signedIn(store);
+
+    const content = sampleContent({});
+    content.projects[0].type = "video";
+    content.projects[0].videoUrl =
+      "https://res.cloudinary.com/demo-cloud/video/upload/v1/portfolio/reel.mp4";
+    const first = await call(handler, "PUT", "/api/content", {
+      cookie,
+      headers: { "x-csrf-token": csrfToken },
+      body: { content, baseVersion: 0 },
+    });
+    assert.equal(first.status, 200);
+
+    const next = sampleContent({});
+    next.projects = next.projects.slice(1);
+    const second = await call(handler, "PUT", "/api/content", {
+      cookie,
+      headers: { "x-csrf-token": csrfToken },
+      body: { content: next, baseVersion: (await first.json()).version },
+    });
+    assert.equal(second.status, 200);
+
+    assert.equal(calls.length, 1);
+    assert.equal(
+      calls[0].url,
+      "https://api.cloudinary.com/v1_1/demo-cloud/video/destroy",
+    );
+    const payload = JSON.parse(calls[0].init.body);
+    assert.equal(payload.public_id, "portfolio/reel");
+    assert.equal("resource_type" in payload, false);
+    assert.match(payload.signature, /^[a-f0-9]{40}$/);
+  } finally {
+    globalThis.fetch = realFetch;
+    if (previous === undefined) delete process.env.CLOUDINARY_URL;
+    else process.env.CLOUDINARY_URL = previous;
+  }
+});
+
+test("the video delete endpoint signs a video destroy request", async () => {
+  const previous = process.env.CLOUDINARY_URL;
+  process.env.CLOUDINARY_URL = "cloudinary://123456789:test-secret@demo-cloud";
+  const realFetch = globalThis.fetch;
+  let requested;
+  globalThis.fetch = async (url, init) => {
+    requested = { url: String(url), init };
+    return new Response(JSON.stringify({ result: "ok" }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  try {
+    const { handler, cookie, csrfToken } = await signedIn(memoryStore());
+    const response = await call(handler, "POST", "/api/video-delete", {
+      cookie,
+      headers: { "x-csrf-token": csrfToken },
+      body: {
+        url: "https://res.cloudinary.com/demo-cloud/video/upload/v1/portfolio/reel.mp4",
+      },
+    });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).public_id, "portfolio/reel");
+    assert.equal(
+      requested.url,
+      "https://api.cloudinary.com/v1_1/demo-cloud/video/destroy",
+    );
+  } finally {
+    globalThis.fetch = realFetch;
+    if (previous === undefined) delete process.env.CLOUDINARY_URL;
+    else process.env.CLOUDINARY_URL = previous;
+  }
+});

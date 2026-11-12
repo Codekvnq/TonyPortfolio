@@ -287,9 +287,43 @@
     return '<span class="pill ' + (published ? 'pill-published' : 'pill-draft') + '">' + (published ? 'Published' : 'Draft') + '</span>';
   }
 
+  // A video project uses a frame of its own video as its cover, so the owner
+  // never has to upload a second image for it.
+  function videoPosterUrl(url) {
+    var value = String(url || '').trim();
+    if (!value) return '';
+
+    var cloudinary = /^(https:\/\/res\.cloudinary\.com\/[^/]+\/video\/upload\/)(.+)$/i.exec(value.split('?')[0]);
+    if (cloudinary) {
+      var rest = cloudinary[2];
+      var version = '';
+      var versionMatch = /^(v\d+\/)/.exec(rest);
+      if (versionMatch) {
+        version = versionMatch[1];
+        rest = rest.slice(version.length);
+      }
+      if (/^[a-z]{2}_/.test(rest)) return '';
+      rest = rest.replace(/\.[a-z0-9]+$/i, '.jpg');
+      return cloudinary[1] + 'so_auto,w_800,c_fill,q_auto/' + version + rest;
+    }
+
+    var youtube = value.match(/(?:youtube(?:-nocookie)?\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|live\/)|youtu\.be\/)([A-Za-z0-9_-]{6,})/i);
+    if (youtube) return 'https://i.ytimg.com/vi/' + youtube[1] + '/hqdefault.jpg';
+
+    return '';
+  }
+
+  function projectCover(project) {
+    if (!project) return '';
+    if (project.cover) return project.cover;
+    if ((project.type || '') === 'video') return videoPosterUrl(project.videoUrl);
+    return '';
+  }
+
   function projectThumb(project) {
-    if (project.cover) {
-      return '<img class="project-thumb" src="' + esc(assetUrl(project.cover)) + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">';
+    var cover = projectCover(project);
+    if (cover) {
+      return '<img class="project-thumb" src="' + esc(assetUrl(cover)) + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">';
     }
     return '<span class="project-thumb placeholder">' + icon('image') + '</span>';
   }
@@ -958,9 +992,24 @@
     window.setTimeout(function () { bootView.hidden = true; }, 200);
   }
 
+  // A cold container can report storage as briefly unavailable. One quiet
+  // retry makes that invisible instead of showing an error on first load.
+  function requestSession(attempt) {
+    return apiJson('/api/session', { cache: 'no-store' }).then(function (result) {
+      if (result.response.status === 503 && attempt < 1) {
+        return new Promise(function (resolve) {
+          window.setTimeout(resolve, 900);
+        }).then(function () {
+          return requestSession(attempt + 1);
+        });
+      }
+      return result;
+    });
+  }
+
   function boot() {
     if (bootNote) bootNote.textContent = 'Checking your session…';
-    return apiJson('/api/session', { cache: 'no-store' }).then(function (result) {
+    return requestSession(0).then(function (result) {
       if (result.response.ok && result.body && result.body.authenticated) {
         applySession(result.body);
         return enterApp();
@@ -1047,11 +1096,27 @@
     }
     loginError.textContent = '';
     setLoginBusy(true);
-    apiJson('/api/login', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ username: username, password: password, remember: remember })
-    }, 20000).then(function (result) {
+
+    function sendLogin(attempt) {
+      return apiJson('/api/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ username: username, password: password, remember: remember })
+      }, 20000).then(function (result) {
+        // Storage (Blobs) can be briefly unavailable on a cold container.
+        // Nothing was signed in, so retrying the sign-in is safe.
+        if (result.response.status === 503 && attempt < 1) {
+          return new Promise(function (resolve) {
+            window.setTimeout(resolve, 900);
+          }).then(function () {
+            return sendLogin(attempt + 1);
+          });
+        }
+        return result;
+      });
+    }
+
+    sendLogin(0).then(function (result) {
       if (!result.response.ok) {
         loginError.textContent = result.body.error || 'That username or password is not correct.';
         var passwordInput = document.getElementById('loginPassword');
@@ -1688,7 +1753,7 @@
       '<button class="icon-btn" type="button" data-close aria-label="Close">' + icon('x') + '</button></div>' +
       '<div class="dialog-body">' +
 
-      '<section class="modal-section"><p class="modal-section-title">Cover image</p>' +
+      '<section class="modal-section" data-cover-section><p class="modal-section-title">Cover image</p>' +
       '<div class="image-field"><div class="image-drop" id="coverDrop" tabindex="0" role="button" aria-label="Cover image">' +
       '<img id="coverImage" src="' + esc(assetUrl(project.cover)) + '" alt=""' + (project.cover ? '' : ' hidden') + '>' +
       '<div class="drop-empty" id="coverEmpty"' + (project.cover ? ' hidden' : '') + '>' + icon('image') + '<span>Drop image<br>or choose a file</span></div></div>' +
@@ -1726,7 +1791,7 @@
       '<div class="video-progress" id="videoProgress" hidden>' +
       '<div class="video-progress-bar"></div>' +
       '</div>' +
-      '<p class="field-help">Only needed for video projects. Upload the file here and it is hosted for the lightbox. Max 500 MB.</p></div>' +
+      '<p class="field-help">Only needed for video projects. Upload the file here and it is hosted for the lightbox. The video\'s own frame becomes the project cover. Max 500 MB.</p></div>' +
       '<div class="field span-2"><label for="projectDescription">Short description</label><textarea class="input" id="projectDescription" rows="3" placeholder="Optional note about the work">' + esc(project.description) + '</textarea></div>' +
       '</div></section>' +
 
@@ -1742,6 +1807,16 @@
       '<button class="btn btn-primary" type="submit">' + (isEdit ? 'Save changes' : 'Add project') + '</button></div></form>';
 
     openDialog(dialog);
+
+    var coverSection = dialog.querySelector('[data-cover-section]');
+    var typeSelect = dialog.querySelector('#projectType');
+    // Video projects take their cover from the video itself, so the cover
+    // upload is not shown (and never required) for them.
+    function syncCoverVisibility() {
+      if (coverSection) coverSection.hidden = typeSelect.value === 'video';
+    }
+    typeSelect.addEventListener('change', syncCoverVisibility);
+    syncCoverVisibility();
 
     var coverImage = dialog.querySelector('#coverImage');
     var coverEmpty = dialog.querySelector('#coverEmpty');
@@ -1898,6 +1973,12 @@
       };
       videoFileInput.value = '';
       project.videoUrl = '';
+      // A project without a video cannot stay a video project, otherwise the
+      // save would just refuse. Fall back to a normal image project.
+      if (typeSelect.value === 'video') {
+        typeSelect.value = 'image';
+        typeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      }
       renderVideo();
     }
 

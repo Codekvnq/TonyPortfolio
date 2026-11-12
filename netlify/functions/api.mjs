@@ -34,11 +34,18 @@ import {
   MAX_FULL_BYTES,
   MAX_THUMB_BYTES,
   deleteMedia,
+  deleteMediaByRef,
   readMediaIndex,
   saveCv,
   saveMedia,
 } from "../lib/media-store.mjs";
-import { getPortfolioStore, readJson, readText } from "../lib/store.mjs";
+import {
+  getPortfolioStore,
+  isBlobsAuthError,
+  readJson,
+  readText,
+  withStoreRetry,
+} from "../lib/store.mjs";
 
 const MAX_BODY_BYTES = 16 * 1024;
 const THROTTLE_LIMIT = 5;
@@ -90,6 +97,125 @@ function isFile(value) {
   );
 }
 
+function cloudinaryConfig() {
+  const cloudUrl = process.env.CLOUDINARY_URL;
+  if (cloudUrl) {
+    const match = cloudUrl.trim().match(/^cloudinary:\/\/([^:]+):([^@]+)@(.+)$/);
+    if (match) {
+      return {
+        apiKey: match[1].trim(),
+        apiSecret: match[2].trim(),
+        cloudName: match[3].trim(),
+      };
+    }
+  }
+  const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+  const apiKey = process.env.CLOUDINARY_API_KEY;
+  const apiSecret = process.env.CLOUDINARY_API_SECRET;
+  if (!cloudName || !apiKey || !apiSecret) return null;
+  return { cloudName, apiKey, apiSecret };
+}
+
+/** The public_id of a Cloudinary video URL, or "" for any other URL. */
+export function videoPublicId(url) {
+  const match = /res\.cloudinary\.com\/[^/]+\/video\/upload\/(.+)$/i.exec(
+    String(url || "").split("?")[0],
+  );
+  if (!match) return "";
+  return match[1].replace(/^v\d+\//, "").replace(/\.[a-z0-9]+$/i, "");
+}
+
+/**
+ * Cloudinary decides between the image and video endpoints by the URL path,
+ * not by a request parameter, and any extra unsigned parameter breaks the
+ * signature. Keep this payload to exactly the three signed fields.
+ */
+async function destroyCloudinaryAsset({ publicId, resourceType = "video" }) {
+  const config = cloudinaryConfig();
+  if (!config || !publicId) return { skipped: true };
+
+  const timestamp = Math.floor(Date.now() / 1000);
+  const signature = createHash("sha1")
+    .update(`public_id=${publicId}&timestamp=${timestamp}${config.apiSecret}`)
+    .digest("hex");
+  const type = resourceType === "video" ? "video" : "image";
+
+  let response;
+  try {
+    response = await fetch(
+      `https://api.cloudinary.com/v1_1/${config.cloudName}/${type}/destroy`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          public_id: publicId,
+          api_key: config.apiKey,
+          timestamp,
+          signature,
+        }),
+      },
+    );
+  } catch {
+    return { error: "Could not reach Cloudinary." };
+  }
+
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) return { error: body.error || "Cloudinary delete failed." };
+  return { deleted: body.deleted === true || body.result === "ok", body };
+}
+
+function collectRefs(content, test) {
+  const refs = new Set();
+  const seen = new Set();
+  (function walk(value) {
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (test(trimmed)) refs.add(trimmed);
+      return;
+    }
+    if (!value || typeof value !== "object" || seen.has(value)) return;
+    seen.add(value);
+    if (Array.isArray(value)) value.forEach(walk);
+    else Object.values(value).forEach(walk);
+  })(content);
+  return refs;
+}
+
+const isMediaRef = (value) => /\/media\/[A-Za-z0-9._-]+/.test(value);
+const isCloudinaryVideo = (value) =>
+  /res\.cloudinary\.com\/[^/]+\/video\/upload\//i.test(value);
+
+/**
+ * Removing a project, a gallery image or a video must not leave the file
+ * behind. Anything the old content pointed at, that the new content no longer
+ * points at, is deleted from Blobs or Cloudinary. Best effort: a storage
+ * hiccup must never fail the save the owner just made.
+ */
+async function cleanupRemovedMedia(db, previous, next) {
+  if (!previous || !next) return;
+
+  const imagesBefore = collectRefs(previous, isMediaRef);
+  const imagesAfter = collectRefs(next, isMediaRef);
+  for (const ref of imagesBefore) {
+    if (imagesAfter.has(ref)) continue;
+    await deleteMediaByRef(db, { ref, content: next }).catch((error) => {
+      console.error("media cleanup failed", ref, error);
+    });
+  }
+
+  const videosBefore = collectRefs(previous, isCloudinaryVideo);
+  const videosAfter = collectRefs(next, isCloudinaryVideo);
+  for (const url of videosBefore) {
+    if (videosAfter.has(url)) continue;
+    const publicId = videoPublicId(url);
+    if (!publicId) continue;
+    const result = await destroyCloudinaryAsset({ publicId }).catch((error) => ({
+      error,
+    }));
+    if (result.error) console.error("video cleanup failed", publicId, result.error);
+  }
+}
+
 export function createApiHandler({
   store,
   now = () => Date.now(),
@@ -98,7 +224,8 @@ export function createApiHandler({
   iterations = DEFAULT_ITERATIONS,
 } = {}) {
   async function database() {
-    return store || getPortfolioStore();
+    if (store) return store;
+    return withStoreRetry(await getPortfolioStore());
   }
 
   async function loadAuth(db) {
@@ -177,12 +304,13 @@ export function createApiHandler({
   async function handleContentGet(req, db) {
     const entry = await readContent(db);
     const fresh = new URL(req.url).searchParams.has("fresh");
+    // No CDN copy: a change saved in the admin has to show on the public site
+    // on the next page load, not up to a minute later.
     const headers = fresh
       ? { "cache-control": "no-store" }
       : {
           "cache-control": "public, max-age=0, must-revalidate",
-          "netlify-cdn-cache-control":
-            "public, max-age=60, stale-while-revalidate=300, durable",
+          "netlify-cdn-cache-control": "no-store",
         };
     if (entry?.etag) headers.etag = entry.etag;
 
@@ -210,6 +338,7 @@ export function createApiHandler({
     const body = await readBody(req, MAX_CONTENT_BYTES + 16 * 1024);
     if (body.error) return json({ error: body.error }, body.status);
 
+    const previous = await readContent(db);
     const result = await saveContent(db, {
       content: body.value.content,
       baseVersion: body.value.baseVersion,
@@ -225,6 +354,14 @@ export function createApiHandler({
         409,
       );
     }
+    // Anything the previous content used that this save dropped is now an
+    // orphan: remove it from Blobs or Cloudinary here, not on the client.
+    await cleanupRemovedMedia(
+      db,
+      previous?.value?.content ?? null,
+      body.value.content,
+    );
+
     return json({
       ok: true,
       version: result.value.version,
@@ -380,28 +517,14 @@ export function createApiHandler({
     const session = await requireSession(req, db);
     if (!session) return json({ error: "Sign in to continue." }, 401);
 
-    const cloudUrl = process.env.CLOUDINARY_URL;
-    let cloudName, apiKey, apiSecret;
-    if (cloudUrl) {
-      const trimmed = cloudUrl.trim();
-      const match = trimmed.match(/^cloudinary:\/\/([^:]+):([^@]+)@(.+)$/);
-      if (match) {
-        apiKey = match[1].trim();
-        apiSecret = match[2].trim();
-        cloudName = match[3].trim();
-      }
-    } else {
-      cloudName = process.env.CLOUDINARY_CLOUD_NAME;
-      apiKey = process.env.CLOUDINARY_API_KEY;
-      apiSecret = process.env.CLOUDINARY_API_SECRET;
-    }
-
-    if (!cloudName || !apiKey || !apiSecret) {
+    const config = cloudinaryConfig();
+    if (!config) {
       return json(
         { error: "Video upload is not configured on the server. Missing Cloudinary credentials." },
         500,
       );
     }
+    const { cloudName, apiKey, apiSecret } = config;
 
     const timestamp = Math.floor(Date.now() / 1000);
     // Cloudinary signature: include ALL params except 'file', 'api_key', 'resource_type', 'signature'
@@ -425,23 +548,7 @@ export function createApiHandler({
     const session = await requireSession(req, db);
     if (!session) return json({ error: "Sign in to continue." }, 401);
 
-    const cloudUrl = process.env.CLOUDINARY_URL;
-    let cloudName, apiKey, apiSecret;
-    if (cloudUrl) {
-      const trimmed = cloudUrl.trim();
-      const match = trimmed.match(/^cloudinary:\/\/([^:]+):([^@]+)@(.+)$/);
-      if (match) {
-        apiKey = match[1].trim();
-        apiSecret = match[2].trim();
-        cloudName = match[3].trim();
-      }
-    } else {
-      cloudName = process.env.CLOUDINARY_CLOUD_NAME;
-      apiKey = process.env.CLOUDINARY_API_KEY;
-      apiSecret = process.env.CLOUDINARY_API_SECRET;
-    }
-
-    if (!cloudName || !apiKey || !apiSecret) {
+    if (!cloudinaryConfig()) {
       return json(
         { error: "Video upload is not configured on the server. Missing Cloudinary credentials." },
         500,
@@ -460,47 +567,23 @@ export function createApiHandler({
       return json({ error: "Could not read request body." }, 400);
     }
 
-    const { public_id, resource_type = "video" } = body;
-    if (!public_id) {
+    const { public_id, url, resource_type = "video" } = body;
+    const publicId = public_id || videoPublicId(url);
+    if (!publicId) {
       return json({ error: "public_id is required." }, 400);
     }
 
-    const timestamp = Math.floor(Date.now() / 1000);
-    // Cloudinary signature: include ALL params except 'file', 'api_key', 'resource_type', 'signature'
-    const signatureString = `public_id=${public_id}&timestamp=${timestamp}${apiSecret}`;
-    const signature = createHash("sha1")
-      .update(signatureString)
-      .digest("hex");
+    const result = await destroyCloudinaryAsset({
+      publicId,
+      resourceType: resource_type,
+    });
+    if (result.error) return json({ error: result.error }, 502);
 
-    let deleteResponse;
-    try {
-      deleteResponse = await fetch(
-        `https://api.cloudinary.com/v1_1/${cloudName}/image/destroy`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            public_id,
-            resource_type,
-            api_key: apiKey,
-            timestamp,
-            signature,
-          }),
-        },
-      );
-    } catch {
-      return json({ error: "Could not reach Cloudinary. Try again later." }, 502);
-    }
-
-    const deleteBody = await deleteResponse.json().catch(() => ({}));
-    if (!deleteResponse.ok) {
-      return json(
-        { error: deleteBody.error || "Cloudinary delete failed." },
-        deleteResponse.status >= 500 ? 502 : 400,
-      );
-    }
-
-    return json({ ok: true, deleted: deleteBody.deleted === true, public_id });
+    return json({
+      ok: true,
+      deleted: Boolean(result.deleted),
+      public_id: publicId,
+    });
   }
 
   function throttleKey(req) {
@@ -863,6 +946,19 @@ export function createApiHandler({
       }
       return json({ error: "Not found." }, 404);
     } catch (error) {
+      // A warm function container can hold a Blobs token that has since
+      // expired. Retrying once with a fresh handle already happened inside the
+      // store proxy; reaching this point means storage is genuinely down.
+      if (isBlobsAuthError(error)) {
+        console.error("blobs auth error", error);
+        return json(
+          {
+            error:
+              "Storage is temporarily unavailable. Please try again in a moment.",
+          },
+          503,
+        );
+      }
       console.error("admin api error", error);
       const msg = error.message || "Something went wrong.";
       return json({ error: msg }, 500);

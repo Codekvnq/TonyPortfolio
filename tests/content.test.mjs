@@ -60,15 +60,12 @@ async function callWithCsrf(
   );
 }
 
-test("content starts empty and is publicly readable with a short cache", async () => {
+test("content is publicly readable and never served from a stale CDN copy", async () => {
   const handler = makeHandler(memoryStore());
 
   const response = await call(handler, "GET", "/api/content");
   assert.equal(response.status, 200);
-  assert.match(
-    response.headers.get("netlify-cdn-cache-control"),
-    /max-age=60/,
-  );
+  assert.equal(response.headers.get("netlify-cdn-cache-control"), "no-store");
   assert.deepEqual(await response.json(), {
     content: null,
     version: 0,

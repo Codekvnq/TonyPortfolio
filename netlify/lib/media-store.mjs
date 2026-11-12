@@ -196,6 +196,35 @@ async function removeFromIndex(store, id) {
   throw new Error("Could not update the media index.");
 }
 
+/**
+ * Turn a stored media URL ("/media/<hash>.webp", possibly absolute or with a
+ * query string) into the Blobs key used by the media index.
+ */
+export function mediaRefToKey(ref) {
+  const value = String(ref || "").split("?")[0].split("#")[0].trim();
+  if (!value) return "";
+  const path = value.replace(/^https?:\/\/[^/]+/i, "");
+  if (!path.startsWith("/media/")) return "";
+  return path.replace(/^\/+/, "");
+}
+
+/** Delete a media item by the URL the site content refers to. */
+export async function deleteMediaByRef(store, { ref, content }) {
+  const key = mediaRefToKey(ref);
+  if (!key) return { notFound: true };
+
+  const items = (await readMediaIndex(store)).items;
+  const target = key.replace(/\.[a-z0-9]+$/i, "");
+  const item = items.find(
+    (candidate) =>
+      candidate.key === key ||
+      candidate.thumbKey === key ||
+      candidate.key.replace(/\.[a-z0-9]+$/i, "") === target,
+  );
+  if (!item) return { notFound: true };
+  return deleteMedia(store, { id: item.id, content });
+}
+
 export async function deleteMedia(store, { id, content }) {
   const existing = (await readMediaIndex(store)).items.find(
     (candidate) => candidate.id === id,

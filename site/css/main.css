@@ -1570,6 +1570,10 @@ a.social-link:hover {
 	.media-box img {
 		display: block; width: 100%;
 		}	
+	/* A video project with no cover of its own shows its first frame here. */
+	.media-box .media-cover-video {
+		display: block; width: 100%; height: auto; object-fit: cover; pointer-events: none;
+		}
 	.media-box .mask {
 		opacity: 0; position: absolute; width: 100%; height: 100%; top: 0; left: 0; bottom: 0; right: 0; text-align: center; overflow: hidden; background: #33475D; background: rgba(3, 36, 74, 0.33);
 		}

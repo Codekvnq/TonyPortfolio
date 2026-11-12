@@ -93,11 +93,43 @@
     return value;
   }
 
+  /* A video project does not need a separate cover image: the first usable
+   * frame of the video itself is the cover. Cloudinary can render that frame
+   * as a still, YouTube gives us a thumbnail, and anything else falls back to
+   * a <video> element showing its own poster frame. */
+  function videoPosterUrl(url) {
+    var value = String(url || '').trim();
+    if (!value) return '';
+
+    var cloudinary = /^(https:\/\/res\.cloudinary\.com\/[^/]+\/video\/upload\/)(.+)$/i.exec(value.split('?')[0]);
+    if (cloudinary) {
+      var rest = cloudinary[2];
+      var version = '';
+      var versionMatch = /^(v\d+\/)/.exec(rest);
+      if (versionMatch) {
+        version = versionMatch[1];
+        rest = rest.slice(version.length);
+      }
+      // An existing transformation chain would need re-signing; our uploads
+      // never carry one, so only add the poster transform to clean paths.
+      if (/^[a-z]{2}_/.test(rest)) return '';
+      rest = rest.replace(/\.[a-z0-9]+$/i, '.jpg');
+      return cloudinary[1] + 'so_auto,w_800,c_fill,q_auto/' + version + rest;
+    }
+
+    var youtube = value.match(/(?:youtube(?:-nocookie)?\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|live\/)|youtu\.be\/)([A-Za-z0-9_-]{6,})/i);
+    if (youtube) return 'https://i.ytimg.com/vi/' + youtube[1] + '/hqdefault.jpg';
+
+    return '';
+  }
+
   function portfolioItem(project) {
     var category = ['illustration', 'media', 'video'].indexOf(project.category) !== -1 ? project.category : 'media';
     var type = project.type || 'image';
     var title = project.title || 'Untitled';
     var anchors = '';
+    var poster = project.cover || (type === 'video' ? videoPosterUrl(project.videoUrl) : '');
+    var inlineVideo = '';
 
     if (type === 'video' && project.videoUrl) {
       var videoUrl = videoEmbedUrl(project.videoUrl);
@@ -107,6 +139,9 @@
       } else {
         anchors = '<a href="' + esc(videoUrl) + '" data-title="' + esc(title) + '" class="lightbox mfp-iframe"></a>';
       }
+      if (!poster && /\.(mp4|webm|mov|m4v|ogv)(\?|#|$)/i.test(videoUrl)) {
+        inlineVideo = '<video class="media-cover-video" src="' + esc(videoUrl) + '#t=0.1" muted playsinline preload="metadata" aria-hidden="true"></video>';
+      }
     } else {
       var gallery = (project.gallery && project.gallery.length ? project.gallery : [project.cover]).filter(Boolean);
       anchors = gallery.map(function (src) {
@@ -114,9 +149,11 @@
       }).join('');
     }
 
-    return '<div class="media-cell ' + category + ' format-' + esc(type) + ' hentry' + (project.cover ? '' : ' no-cover') + '">' +
+    var hasCover = Boolean(poster || inlineVideo);
+
+    return '<div class="media-cell ' + category + ' format-' + esc(type) + ' hentry' + (hasCover ? '' : ' no-cover') + '">' +
       '<div class="media-box">' +
-      (project.cover ? '<img src="' + esc(project.cover) + '" alt="' + esc(title) + '">' : '') +
+      (poster ? '<img src="' + esc(poster) + '" alt="' + esc(title) + '">' : inlineVideo) +
       '<div class="mask"></div>' + anchors +
       '</div>' +
       '<div class="media-cell-desc"><h3>' + esc(title) + '</h3>' +
