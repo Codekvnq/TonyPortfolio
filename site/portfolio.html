@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" class="no-js classic-page-layout " data-audio-tick="audio/tick.mp3" data-click-ripple-animation="yes">
+<html lang="en" class="no-js classic-page-layout " data-audio-tick="audio/tick.wav" data-click-ripple-animation="yes">
 
 <head>
 
@@ -17,6 +17,9 @@
     <link rel="apple-touch-icon" href="images/ico/apple-touch-icon.png">
 
     <!-- FONTS -->
+    <link rel="preload" href="css/fonts/jost/jost-400-book.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="css/fonts/jost/jost-500-medium.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="css/fonts/jost/jost-700-bold.woff2" as="font" type="font/woff2" crossorigin>
     <link rel="stylesheet" href="css/fonts/jost/jost.css">
     <link href="https://fonts.googleapis.com/css?family=Anton" rel="stylesheet">
 
@@ -236,7 +239,7 @@
                                             <div class="media-cell illustration format-gallery hentry">
 
                                                 <div class="media-box">
-                                                    <img src="images/portfolio/01.jpeg" alt="portfolio-post">
+                                                    <img src="images/portfolio/thumbs/01.webp" data-full="images/portfolio/01.jpeg" alt="portfolio-post" fetchpriority="high" decoding="async">
                                                     <div class="mask"></div>
                                                     <!-- <a href="#" class="ajax"></a> -->
                                                     <!-- lightbox - gallery -->
@@ -263,7 +266,7 @@
                                             <!-- portfolio-item - lightbox gallery -->
                                             <div class="media-cell media format-gallery hentry">
                                                 <div class="media-box">
-                                                    <img src="images/portfolio/03.jpeg" alt="portfolio-post">
+                                                    <img src="images/portfolio/thumbs/03.webp" data-full="images/portfolio/03.jpeg" alt="portfolio-post" loading="lazy" decoding="async">
                                                     <div class="mask"></div>
                                                     <!-- lightbox - gallery -->
                                                     <a href="images/portfolio/lightbox-01.jpeg" class="lightbox"
@@ -288,7 +291,7 @@
                                             <div class="media-cell video format-video hentry">
 
                                                 <div class="media-box">
-                                                    <img src="images/portfolio/09.png" alt="portfolio-post">
+                                                    <img src="images/portfolio/thumbs/09.webp" data-full="images/portfolio/09.png" alt="portfolio-post" loading="lazy" decoding="async">
                                                     <div class="mask"></div>
                                                     <!-- lightbox - video -->
                                                     <a href="video/MyLogoReview.html" data-title="My Logo Review"
@@ -309,7 +312,7 @@
                                             <!-- portfolio-item - image popup -->
                                             <div class="media-cell media format-image hentry">
                                                 <div class="media-box">
-                                                    <img src="images/portfolio/05.jpeg" alt="portfolio-post">
+                                                    <img src="images/portfolio/thumbs/05.webp" data-full="images/portfolio/05.jpeg" alt="portfolio-post" loading="lazy" decoding="async">
                                                     <div class="mask"></div>
                                                     <!-- lightbox - image -->
                                                     <a href="images/portfolio/05.jpeg" data-title="Church Designs"
@@ -328,7 +331,7 @@
                                             <div class="media-cell media format-image hentry">
 
                                                 <div class="media-box">
-                                                    <img src="images/portfolio/02.jpeg" alt="portfolio-post">
+                                                    <img src="images/portfolio/thumbs/02.webp" data-full="images/portfolio/02.jpeg" alt="portfolio-post" loading="lazy" decoding="async">
                                                     <div class="mask"></div>
                                                     <a href="images/portfolio/02.jpeg" data-title="Food Flyer Designs"
                                                         class="lightbox"></a>
@@ -345,7 +348,7 @@
                                             <!-- portfolio-item - lightbox video -->
                                             <div class="media-cell video format-video hentry">
                                                 <div class="media-box">
-                                                    <img src="images/portfolio/10.png" alt="portfolio-post">
+                                                    <img src="images/portfolio/thumbs/10.webp" data-full="images/portfolio/10.png" alt="portfolio-post" loading="lazy" decoding="async">
                                                     <div class="mask"></div>
                                                     <!-- lightbox - video -->
                                                     <a href="video/SeagLogoReview.html" data-title="Seag Logo Review"
@@ -363,7 +366,7 @@
                                             <!-- portfolio-item -->
                                             <div class="media-cell media format-image hentry">
                                                 <div class="media-box">
-                                                    <img src="images/portfolio/08.jpeg" alt="portfolio-post">
+                                                    <img src="images/portfolio/thumbs/08.webp" data-full="images/portfolio/08.jpeg" alt="portfolio-post" loading="lazy" decoding="async">
                                                     <div class="mask"></div>
                                                     <a href="images/portfolio/08.jpeg"
                                                         data-title="Branding Presentation Kit" class="lightbox"></a>
@@ -379,7 +382,7 @@
                                             <!-- portfolio-item - lightbox image -->
                                             <div class="media-cell media format-image hentry">
                                                 <div class="media-box">
-                                                    <img src="images/portfolio/04.jpeg" alt="portfolio-post">
+                                                    <img src="images/portfolio/thumbs/04.webp" data-full="images/portfolio/04.jpeg" alt="portfolio-post" loading="lazy" decoding="async">
                                                     <div class="mask"></div>
                                                     <!-- lightbox - image -->
                                                     <a href="images/portfolio/04.jpeg"
@@ -397,7 +400,7 @@
                                             <!-- portfolio-item - popup image -->
                                             <div class="media-cell illustration format-image hentry">
                                                 <div class="media-box">
-                                                    <img src="images/portfolio/07.jpeg" alt="portfolio-post">
+                                                    <img src="images/portfolio/thumbs/07.webp" data-full="images/portfolio/07.jpeg" alt="portfolio-post" loading="lazy" decoding="async">
                                                     <div class="mask"></div>
                                                     <a href="images/portfolio/07.jpeg"
                                                         data-title="Creatin — Way The Right Way" class="lightbox"></a>
@@ -413,7 +416,7 @@
                                             <!-- portfolio-item - popup image -->
                                             <div class="media-cell media format-image hentry">
                                                 <div class="media-box">
-                                                    <img src="images/portfolio/06.jpeg" alt="portfolio-post">
+                                                    <img src="images/portfolio/thumbs/06.webp" data-full="images/portfolio/06.jpeg" alt="portfolio-post" loading="lazy" decoding="async">
                                                     <div class="mask"></div>
                                                     <!-- lightbox - image -->
                                                     <a href="images/portfolio/06.jpeg" data-title="Carols Flyer Design"
@@ -430,7 +433,7 @@
                                             <div class="media-cell illustration format-gallery hentry">
 
                                                 <div class="media-box">
-                                                    <img src="images/portfolio/HX01.jpeg" alt="portfolio-post">
+                                                    <img src="images/portfolio/thumbs/HX01.webp" data-full="images/portfolio/HX01.jpeg" alt="portfolio-post" loading="lazy" decoding="async">
                                                     <div class="mask"></div>
                                                     <!-- <a href="#" class="ajax"></a> -->
                                                     <!-- lightbox - gallery -->
@@ -459,7 +462,7 @@
                                             <!-- portfolio-item - lightbox image -->
                                             <div class="media-cell media format-image hentry">
                                                 <div class="media-box">
-                                                    <img src="images/portfolio/CH01.jpeg" alt="portfolio-post">
+                                                    <img src="images/portfolio/thumbs/CH01.webp" data-full="images/portfolio/CH01.jpeg" alt="portfolio-post" loading="lazy" decoding="async">
                                                     <div class="mask"></div>
                                                     <!-- lightbox - image -->
                                                     <a href="images/portfolio/CH01.jpeg"
@@ -475,7 +478,7 @@
                                             <!-- portfolio-item - lightbox image -->
                                             <div class="media-cell media format-image hentry">
                                                 <div class="media-box">
-                                                    <img src="images/portfolio/B01.jpeg" alt="portfolio-post">
+                                                    <img src="images/portfolio/thumbs/B01.webp" data-full="images/portfolio/B01.jpeg" alt="portfolio-post" loading="lazy" decoding="async">
                                                     <div class="mask"></div>
                                                     <!-- lightbox - image -->
                                                     <a href="images/portfolio/B01.jpeg" data-title="Birthday Design"
@@ -492,7 +495,7 @@
                                             <div class="media-cell illustration format-gallery hentry">
 
                                                 <div class="media-box">
-                                                    <img src="images/portfolio/EFE01.jpeg" alt="portfolio-post">
+                                                    <img src="images/portfolio/thumbs/EFE01.webp" data-full="images/portfolio/EFE01.jpeg" alt="portfolio-post" loading="lazy" decoding="async">
                                                     <div class="mask"></div>
                                                     <!-- <a href="#" class="ajax"></a> -->
                                                     <!-- lightbox - gallery -->
@@ -515,7 +518,7 @@
                                             <!-- portfolio-item - lightbox image -->
                                             <div class="media-cell media format-image hentry">
                                                 <div class="media-box">
-                                                    <img src="images/portfolio/E01.jpeg" alt="portfolio-post">
+                                                    <img src="images/portfolio/thumbs/E01.webp" data-full="images/portfolio/E01.jpeg" alt="portfolio-post" loading="lazy" decoding="async">
                                                     <div class="mask"></div>
                                                     <!-- lightbox - image -->
                                                     <a href="images/portfolio/E01.jpeg" data-title="Church Card Design"
@@ -531,7 +534,7 @@
                                             <!-- portfolio-item - lightbox image -->
                                             <div class="media-cell media format-image hentry">
                                                 <div class="media-box">
-                                                    <img src="images/portfolio/C01.jpeg" alt="portfolio-post">
+                                                    <img src="images/portfolio/thumbs/C01.webp" data-full="images/portfolio/C01.jpeg" alt="portfolio-post" loading="lazy" decoding="async">
                                                     <div class="mask"></div>
                                                     <!-- lightbox - image -->
                                                     <a href="images/portfolio/C01.jpeg" data-title="Citation Design"
@@ -547,7 +550,7 @@
                                             <!-- portfolio-item - lightbox image -->
                                             <div class="media-cell media format-image hentry">
                                                 <div class="media-box">
-                                                    <img src="images/portfolio/CD01.jpg" alt="portfolio-post">
+                                                    <img src="images/portfolio/thumbs/CD01.webp" data-full="images/portfolio/CD01.jpg" alt="portfolio-post" loading="lazy" decoding="async">
                                                     <div class="mask"></div>
                                                     <!-- lightbox - image -->
                                                     <a href="images/portfolio/CD01.jpg" data-title="Church Card Design"
@@ -563,7 +566,7 @@
                                             <!-- portfolio-item - lightbox image -->
                                             <div class="media-cell media format-image hentry">
                                                 <div class="media-box">
-                                                    <img src="images/portfolio/WM01.jpg" alt="portfolio-post">
+                                                    <img src="images/portfolio/thumbs/WM01.webp" data-full="images/portfolio/WM01.jpg" alt="portfolio-post" loading="lazy" decoding="async">
                                                     <div class="mask"></div>
                                                     <!-- lightbox - image -->
                                                     <a href="images/portfolio/WM01.jpg" data-title="Citation Design"

@@ -123,13 +123,29 @@
     return '';
   }
 
-  function portfolioItem(project) {
+  // The grid only needs a small image; the full file stays for the lightbox.
+  // Uploaded media already ships a thumbnail beside the original, and the
+  // legacy images/portfolio set gets one generated at images/portfolio/thumbs.
+  function gridImageUrl(src) {
+    var value = String(src || '').trim();
+    if (!value) return value;
+    var media = /^\/?(media\/[^/?#]+)\.(webp|jpe?g|png)(\?|#|$)/i.exec(value);
+    if (media) return '/' + media[1] + '-thumb.' + media[2];
+    var legacy = /^images\/portfolio\/([^/?#]+)\.(jpe?g|png|webp)(\?|#|$)/i.exec(value);
+    if (legacy) return 'images/portfolio/thumbs/' + legacy[1] + '.webp';
+    return value;
+  }
+
+  function portfolioItem(project, index) {
     var category = ['illustration', 'media', 'video'].indexOf(project.category) !== -1 ? project.category : 'media';
     var type = project.type || 'image';
     var title = project.title || 'Untitled';
     var anchors = '';
     var poster = project.cover || (type === 'video' ? videoPosterUrl(project.videoUrl) : '');
     var inlineVideo = '';
+    var imageAttrs = index < 2
+      ? ' fetchpriority="high" decoding="async"'
+      : ' loading="lazy" decoding="async"';
 
     if (type === 'video' && project.videoUrl) {
       var videoUrl = videoEmbedUrl(project.videoUrl);
@@ -153,7 +169,7 @@
 
     return '<div class="media-cell ' + category + ' format-' + esc(type) + ' hentry' + (hasCover ? '' : ' no-cover') + '">' +
       '<div class="media-box">' +
-      (poster ? '<img src="' + esc(poster) + '" alt="' + esc(title) + '">' : inlineVideo) +
+      (poster ? '<img src="' + esc(gridImageUrl(poster)) + '" alt="' + esc(title) + '"' + imageAttrs + '>' : inlineVideo) +
       '<div class="mask"></div>' + anchors +
       '</div>' +
       '<div class="media-cell-desc"><h3>' + esc(title) + '</h3>' +
@@ -168,7 +184,6 @@
     grid.innerHTML = published.length
       ? published.map(portfolioItem).join('')
       : '<p class="portfolio-empty">No projects have been published yet. Add work in the admin to fill this grid.</p>';
-
     if (window.jQuery && window.jQuery.fn.isotope && window.jQuery(grid).data('isotope')) {
       var $grid = window.jQuery(grid);
       $grid.isotope('reloadItems').isotope('layout');

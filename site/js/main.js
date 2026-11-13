@@ -19,6 +19,18 @@
   var homeLoaded = false;
   var autoplay = false;
 
+  // Browsers reject play() before the first user gesture, and a missing or
+  // unsupported file rejects too. Neither should surface as an uncaught error.
+  function playAudio(audio) {
+    if (!audio) return;
+    try {
+      var result = audio.play();
+      if (result && typeof result.catch === "function") result.catch(function () {});
+    } catch (error) {
+      /* autoplay blocked or media unsupported */
+    }
+  }
+
   /* DOCUMENT LOAD */
   $(function () {
 
@@ -35,6 +47,7 @@
     if (soundEffects) {
       tick = document.createElement("audio");
       tick.setAttribute("src", $("html").data("audio-tick"));
+      tick.preload = "auto";
     }
     // ------------------------------
 
@@ -70,7 +83,7 @@
 
         // Play Sound Effect
         if (soundEffects) {
-          tick.play();
+          playAudio(tick);
         }
 
         return false;
@@ -508,7 +521,7 @@
           isUserTurnedOffMusic = true;
         } else {
           music.volume = 0.5;
-          music.play();
+          playAudio(music);
           isUserTurnedOffMusic = false;
         }
       }
@@ -574,7 +587,7 @@
 
       function unMuteAudio() {
         if (!isUserTurnedOffMusic && !isLigtboxTurnedOffMusic) {
-          music.play();
+          playAudio(music);
         }
       }
 
@@ -765,7 +778,7 @@
               if (this.content.find('iframe[src*="soundcloud.com"]').length || this.content.find('iframe[src*="vimeo.com"]').length || this.content.find('iframe[src*="youtube.com"]').length || this.content.find('iframe[src*=".mp4"]').length) {
                 if (!isUserTurnedOffMusic) {
                   if (music) {
-                    music.play();
+                    playAudio(music);
                     isLigtboxTurnedOffMusic = false;
                   }
 
@@ -1127,7 +1140,7 @@
 
         // Play Sound Effect
         if (soundEffects) {
-          tick.play();
+          playAudio(tick);
         }
 
         p.removeClass("animate-in animate-out")
@@ -1151,7 +1164,7 @@
 
     // Play Sound Effect
     if (soundEffects) {
-      tick.play();
+      playAudio(tick);
     }
 
     $("html").addClass("p-animating");
@@ -1262,7 +1275,7 @@
 
     // Play Sound Effect
     if (soundEffects) {
-      tick.play();
+      playAudio(tick);
     }
 
     $("html").addClass("is-ajax-page-active");

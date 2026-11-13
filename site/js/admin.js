@@ -320,10 +320,22 @@
     return '';
   }
 
+  // Small version of a cover for tables and grids. Uploaded media has a
+  // "-thumb" file beside it; legacy images get one in images/portfolio/thumbs.
+  function thumbUrl(src) {
+    var value = String(src || '').trim();
+    if (!value) return value;
+    var media = /^\/?(media\/[^/?#]+)\.(webp|jpe?g|png)(\?|#|$)/i.exec(value);
+    if (media) return '/' + media[1] + '-thumb.' + media[2];
+    var legacy = /^images\/portfolio\/([^/?#]+)\.(jpe?g|png|webp)(\?|#|$)/i.exec(value);
+    if (legacy) return 'images/portfolio/thumbs/' + legacy[1] + '.webp';
+    return value;
+  }
+
   function projectThumb(project) {
     var cover = projectCover(project);
     if (cover) {
-      return '<img class="project-thumb" src="' + esc(assetUrl(cover)) + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">';
+      return '<img class="project-thumb" src="' + esc(assetUrl(thumbUrl(cover))) + '" data-fallback="' + esc(assetUrl(cover)) + '" alt="" loading="lazy" onerror="this.onerror=null;this.src=this.getAttribute(\'data-fallback\')">';
     }
     return '<span class="project-thumb placeholder">' + icon('image') + '</span>';
   }
@@ -628,10 +640,30 @@
     });
   }
 
+  // Browsers report the MIME type from the file's contents, but some files
+  // (and some Windows/Android uploads) arrive with an empty type. Fall back to
+  // the extension so a "PHOTO.JPG" or "art.PNG" is still accepted.
+  var IMAGE_EXTENSIONS = /\.(jpe?g|png|webp|gif|bmp|avif)$/i;
+
+  function isSupportedImage(file) {
+    var type = String(file.type || '').toLowerCase();
+    var name = String(file.name || '');
+    if (type === 'image/svg+xml' || /\.svg$/i.test(name)) return false;
+    return /^image\//.test(type) || IMAGE_EXTENSIONS.test(name);
+  }
+
+  function imageErrorMessage(file) {
+    var name = String((file && file.name) || '').toLowerCase();
+    if (/\.(heic|heif|tiff?|psd|ai|raw|cr2|nef)$/.test(name)) {
+      return 'That format is not supported by browsers. Export it as JPG, PNG or WebP and try again.';
+    }
+    return 'That file could not be read as an image. Use a JPG, PNG or WebP image.';
+  }
+
   function prepareImage(file, maxSize, quality) {
     return new Promise(function (resolve, reject) {
-      if (!file || !/^image\//i.test(file.type) || /svg/i.test(file.type)) {
-        reject(new Error('Use a WebP, JPEG or PNG image.'));
+      if (!file || !isSupportedImage(file)) {
+        reject(new Error('Use a JPG, PNG or WebP image.'));
         return;
       }
       var url = URL.createObjectURL(file);
@@ -655,7 +687,7 @@
       };
       image.onerror = function () {
         URL.revokeObjectURL(url);
-        reject(new Error('That file could not be read as an image.'));
+        reject(new Error(imageErrorMessage(file)));
       };
       image.src = url;
     });
@@ -1247,6 +1279,7 @@
   }
 
   function renderRoute() {
+    closeRowMenu();
     var route = currentRoute();
     if (route !== state.route) state.editing = false;
     state.route = route;
@@ -1510,9 +1543,6 @@
     }
 
     return projects.map(function (project) {
-      var index = state.data.projects.findIndex(function (item) { return item.id === project.id; });
-      var isFirst = index <= 0;
-      var isLast = index >= state.data.projects.length - 1;
       return '<tr data-row-id="' + esc(project.id) + '">' +
         '<td><div class="project-cell">' + projectThumb(project) +
         '<div class="project-copy"><button class="link-button" type="button" data-project-action="edit" data-project-id="' + esc(project.id) + '">' + esc(project.title) + '</button>' +
@@ -1520,19 +1550,12 @@
         '<td class="col-category"><span class="chip">' + esc(categoryLabel(project.category)) + '</span></td>' +
         '<td class="col-status">' + statusPill(project.status) + '</td>' +
         '<td class="col-updated muted-cell">' + esc(formatDate(project.updatedAt)) + '</td>' +
-        '<td class="col-actions"><details class="row-menu"><summary aria-label="Project actions">' + icon('more') + '</summary>' +
-        '<div class="menu">' +
-        '<button type="button" data-project-action="edit" data-project-id="' + esc(project.id) + '">' + icon('edit') + 'Edit project</button>' +
-        '<button type="button" data-project-action="duplicate" data-project-id="' + esc(project.id) + '">' + icon('copy') + 'Duplicate</button>' +
-        '<button type="button" data-project-action="toggle-status" data-project-id="' + esc(project.id) + '">' + icon(project.status === 'published' ? 'eye' : 'upload') + (project.status === 'published' ? 'Unpublish' : 'Publish') + '</button>' +
-        '<hr><button type="button" data-project-action="move-up" data-project-id="' + esc(project.id) + '"' + (isFirst ? ' disabled' : '') + '>' + icon('arrowUp') + 'Move up</button>' +
-        '<button type="button" data-project-action="move-down" data-project-id="' + esc(project.id) + '"' + (isLast ? ' disabled' : '') + '> ' + icon('arrowDown') + 'Move down</button>' +
-        '<hr><button class="danger" type="button" data-project-action="delete" data-project-id="' + esc(project.id) + '">' + icon('trash') + 'Delete</button>' +
-        '</div></details></td></tr>';
+        '<td class="col-actions"><button class="row-menu-btn" type="button" data-project-menu="' + esc(project.id) + '" aria-label="Actions for ' + esc(project.title) + '" aria-haspopup="menu" aria-expanded="false">' + icon('more') + '</button></td></tr>';
     }).join('');
   }
 
   function refreshProjectTable() {
+    closeRowMenu();
     var projects = filteredProjects(state.data);
     var body = document.getElementById('projectTableBody');
     if (!body) return;
@@ -1615,15 +1638,81 @@
     }
   }
 
-  function handlePortfolioClick(event) {
-    var button = event.target.closest('[data-project-action]');
-    if (!button) return;
-    var action = button.getAttribute('data-project-action');
-    var id = button.getAttribute('data-project-id');
+  // The row menu is a fixed-position popover appended to <body>, so it is never
+  // clipped by the table panel's overflow and always paints above the rows.
+  var rowMenu = null;
 
-    var menu = button.closest('details');
-    if (menu) menu.open = false;
+  function closeRowMenu() {
+    if (!rowMenu) return;
+    rowMenu.anchor.setAttribute('aria-expanded', 'false');
+    rowMenu.el.remove();
+    document.removeEventListener('pointerdown', rowMenu.onOutside, true);
+    document.removeEventListener('keydown', rowMenu.onKey, true);
+    window.removeEventListener('resize', closeRowMenu);
+    window.removeEventListener('scroll', closeRowMenu, true);
+    rowMenu = null;
+  }
 
+  function openRowMenu(anchor, project) {
+    closeRowMenu();
+    var index = state.data.projects.findIndex(function (item) { return item.id === project.id; });
+    var isFirst = index <= 0;
+    var isLast = index >= state.data.projects.length - 1;
+
+    var menu = document.createElement('div');
+    menu.className = 'row-menu-pop';
+    menu.setAttribute('role', 'menu');
+    menu.setAttribute('aria-label', 'Actions for ' + project.title);
+    menu.innerHTML =
+      '<button type="button" role="menuitem" data-menu-action="edit">' + icon('edit') + '<span>Edit project</span></button>' +
+      '<button type="button" role="menuitem" data-menu-action="view">' + icon('external') + '<span>View on site</span></button>' +
+      '<button type="button" role="menuitem" data-menu-action="toggle-status">' + icon(project.status === 'published' ? 'eye' : 'upload') + '<span>' + (project.status === 'published' ? 'Unpublish' : 'Publish') + '</span></button>' +
+      '<hr>' +
+      '<button type="button" role="menuitem" data-menu-action="move-up"' + (isFirst ? ' disabled' : '') + '>' + icon('arrowUp') + '<span>Move up</span></button>' +
+      '<button type="button" role="menuitem" data-menu-action="move-down"' + (isLast ? ' disabled' : '') + '>' + icon('arrowDown') + '<span>Move down</span></button>' +
+      '<hr>' +
+      '<button class="danger" type="button" role="menuitem" data-menu-action="delete">' + icon('trash') + '<span>Delete</span></button>';
+    document.body.appendChild(menu);
+
+    // Measure after insertion so the menu can flip up when it would overflow.
+    var rect = anchor.getBoundingClientRect();
+    var size = menu.getBoundingClientRect();
+    var top = rect.bottom + 6;
+    if (top + size.height > window.innerHeight - 8) {
+      top = Math.max(8, rect.top - size.height - 6);
+    }
+    var left = Math.max(8, Math.min(rect.right - size.width, window.innerWidth - size.width - 8));
+    menu.style.top = Math.round(top) + 'px';
+    menu.style.left = Math.round(left) + 'px';
+
+    anchor.setAttribute('aria-expanded', 'true');
+
+    var onOutside = function (event) {
+      if (menu.contains(event.target) || anchor.contains(event.target)) return;
+      closeRowMenu();
+    };
+    var onKey = function (event) {
+      if (event.key === 'Escape') {
+        closeRowMenu();
+        anchor.focus();
+      }
+    };
+    menu.addEventListener('click', function (event) {
+      var action = event.target.closest('[data-menu-action]');
+      if (!action || action.disabled) return;
+      var name = action.getAttribute('data-menu-action');
+      closeRowMenu();
+      runProjectAction(name, project.id);
+    });
+
+    document.addEventListener('pointerdown', onOutside, true);
+    document.addEventListener('keydown', onKey, true);
+    window.addEventListener('resize', closeRowMenu);
+    window.addEventListener('scroll', closeRowMenu, true);
+    rowMenu = { el: menu, anchor: anchor, onOutside: onOutside, onKey: onKey };
+  }
+
+  function runProjectAction(action, id) {
     if (action === 'new') {
       openProjectDialog(null);
       return;
@@ -1637,12 +1726,12 @@
       refreshProjectTable();
       return;
     }
-    if (action === 'edit') {
-      openProjectDialog(id);
+    if (action === 'view') {
+      window.open('../portfolio.html?fresh=1', '_blank', 'noopener');
       return;
     }
-    if (action === 'duplicate') {
-      duplicateProject(id);
+    if (action === 'edit') {
+      openProjectDialog(id);
       return;
     }
     if (action === 'toggle-status') {
@@ -1658,18 +1747,21 @@
     }
   }
 
-  function duplicateProject(id) {
-    var source = state.data.projects.find(function (project) { return project.id === id; });
-    if (!source) return;
-    var copy = JSON.parse(JSON.stringify(source));
-    copy.id = uid('project');
-    copy.title = source.title + ' (copy)';
-    copy.status = 'draft';
-    copy.updatedAt = new Date().toISOString();
-    saveData(function (data) {
-      data.projects.unshift(copy);
-    }, { toast: 'Project duplicated as a draft.' });
-    refreshProjectTable();
+  function handlePortfolioClick(event) {
+    var menuButton = event.target.closest('[data-project-menu]');
+    if (menuButton) {
+      event.preventDefault();
+      var projectId = menuButton.getAttribute('data-project-menu');
+      var project = state.data.projects.find(function (item) { return item.id === projectId; });
+      if (!project) return;
+      if (rowMenu && rowMenu.anchor === menuButton) closeRowMenu();
+      else openRowMenu(menuButton, project);
+      return;
+    }
+
+    var button = event.target.closest('[data-project-action]');
+    if (!button) return;
+    runProjectAction(button.getAttribute('data-project-action'), button.getAttribute('data-project-id'));
   }
 
   function toggleProjectStatus(id) {
@@ -1736,16 +1828,47 @@
     };
   }
 
+  // Existing projects store their cover separately from the gallery. For an
+  // image project the cover is just the first gallery image, so fold them back
+  // together (without duplicates) when the dialog opens.
+  function projectImageRefs(project) {
+    var refs = [];
+    if (!project || project.type === 'video') return refs;
+    [project.cover].concat(project.gallery || []).forEach(function (src) {
+      var value = String(src || '').trim();
+      if (value && refs.indexOf(value) === -1) refs.push(value);
+    });
+    return refs;
+  }
+
+  // Media uploads always get a small thumbnail beside the full file.
+  function imageThumbUrl(src) {
+    var value = String(src || '').trim();
+    if (!value || /^(data:|blob:|https?:)/i.test(value)) return value;
+    var key = value.replace(/^\.?\//, '');
+    if (/^media\//.test(key)) {
+      return assetUrl(key.replace(/\.(webp|jpe?g|png)$/i, '-thumb.$1'));
+    }
+    return assetUrl(value);
+  }
+
   function openProjectDialog(id) {
     var existing = id ? state.data.projects.find(function (project) { return project.id === id; }) : null;
     var project = existing ? JSON.parse(JSON.stringify(existing)) : blankProject();
     var isEdit = Boolean(existing);
+    var images = projectImageRefs(project);
     // A new dialog starts with no pending video, so a file chosen in an
     // abandoned form can never be uploaded for the next project.
     videoUploadState = { status: 'idle', file: null, item: null, error: null, progress: 0, promise: null };
 
+    var typeOptions = [
+      { value: 'image', label: 'Single image' },
+      { value: 'gallery', label: 'Image gallery' },
+      { value: 'video', label: 'Video' }
+    ];
+
     var dialog = document.createElement('dialog');
-    dialog.className = 'dialog';
+    dialog.className = 'dialog dialog-project';
     dialog.innerHTML =
       '<form method="dialog" id="projectForm" novalidate>' +
       '<div class="dialog-head"><div><h2>' + (isEdit ? 'Edit project' : 'Add project') + '</h2>' +
@@ -1753,34 +1876,38 @@
       '<button class="icon-btn" type="button" data-close aria-label="Close">' + icon('x') + '</button></div>' +
       '<div class="dialog-body">' +
 
-      '<section class="modal-section" data-cover-section><p class="modal-section-title">Cover image</p>' +
-      '<div class="image-field"><div class="image-drop" id="coverDrop" tabindex="0" role="button" aria-label="Cover image">' +
-      '<img id="coverImage" src="' + esc(assetUrl(project.cover)) + '" alt=""' + (project.cover ? '' : ' hidden') + '>' +
-      '<div class="drop-empty" id="coverEmpty"' + (project.cover ? ' hidden' : '') + '>' + icon('image') + '<span>Drop image<br>or choose a file</span></div></div>' +
-      '<div class="image-field-actions"><div class="row">' +
-      '<button class="btn btn-secondary btn-sm" type="button" data-choose-cover>' + icon('upload') + 'Choose image</button>' +
-      '<button class="btn btn-ghost btn-sm" type="button" data-clear-cover' + (project.cover ? '' : ' hidden') + '>Remove</button></div>' +
-      '<div class="field"><label for="coverUrl">Image URL</label><input class="input" id="coverUrl" type="text" value="' + esc(project.cover) + '" placeholder="images/portfolio/01.jpeg" spellcheck="false"></div>' +
-      '<p class="field-help">Uploads are optimised and saved to the media library with a permanent /media/ URL.</p></div></div>' +
-      '<input type="file" id="coverFile" accept="image/*" hidden></section>' +
-
       '<section class="modal-section"><p class="modal-section-title">Details</p><div class="form-grid">' +
-      '<div class="field span-2"><label for="projectTitle">Project title</label><input class="input" id="projectTitle" type="text" value="' + esc(project.title) + '">' +
+      '<div class="field span-2"><label for="projectTitle">Project title</label><input class="input" id="projectTitle" type="text" value="' + esc(project.title) + '" placeholder="e.g. Branding illustrations">' +
       '<p class="field-error" id="titleError" hidden>Give the project a title.</p></div>' +
-      '<div class="field"><label for="projectClient">Client or subtitle</label><input class="input" id="projectClient" type="text" value="' + esc(project.client) + '" placeholder="for Erfolg"></div>' +
+      '<div class="field"><label for="projectClient">Client or subtitle</label><input class="input" id="projectClient" type="text" value="' + esc(project.client) + '" placeholder="Optional"></div>' +
       '<div class="field"><label for="projectCategory">Category</label><select class="input" id="projectCategory">' +
       ['illustration', 'media', 'video'].map(function (category) {
         return '<option value="' + category + '"' + (project.category === category ? ' selected' : '') + '>' + categoryLabel(category) + '</option>';
       }).join('') + '</select></div>' +
       '<div class="field"><label for="projectType">Format</label><select class="input" id="projectType">' +
-      ['image', 'gallery', 'video'].map(function (type) {
-        return '<option value="' + type + '"' + (project.type === type ? ' selected' : '') + '>' + type.charAt(0).toUpperCase() + type.slice(1) + '</option>';
+      typeOptions.map(function (option) {
+        return '<option value="' + option.value + '"' + (project.type === option.value ? ' selected' : '') + '>' + option.label + '</option>';
       }).join('') + '</select></div>' +
-      '<div class="field"><label for="projectStatus">Status</label><select class="input" id="projectStatus">' +
+      '<div class="field"><label for="projectStatus">Visibility</label><select class="input" id="projectStatus">' +
       '<option value="published"' + (project.status === 'published' ? ' selected' : '') + '>Published</option>' +
-      '<option value="draft"' + (project.status === 'draft' ? ' selected' : '') + '>Draft</option>' +
+      '<option value="draft"' + (project.status === 'draft' ? ' selected' : '') + '>Draft (hidden)</option>' +
       '</select></div>' +
-      '<div class="field span-2"><label for="projectVideo">Video file</label>' +
+      '<div class="field span-2"><label for="projectDescription">Short description</label><textarea class="input" id="projectDescription" rows="2" placeholder="Optional note about the work">' + esc(project.description) + '</textarea></div>' +
+      '</div></section>' +
+
+      '<section class="modal-section" data-images-section>' +
+      '<div class="section-head"><div><p class="modal-section-title">Images</p>' +
+      '<p class="field-help">The first image is the cover on the portfolio grid. Every image opens in the lightbox.</p></div>' +
+      '<button class="btn btn-secondary btn-sm" type="button" data-choose-images>' + icon('upload') + 'Upload images</button></div>' +
+      '<div class="upload-drop" id="imageDrop" tabindex="0" role="button" aria-label="Add project images">' +
+      icon('image') + '<strong>Drop images here</strong><span>or click to browse — JPG, PNG or WebP</span></div>' +
+      '<div class="media-grid-edit" id="imageGrid"></div>' +
+      '<p class="field-error" id="imagesError" hidden>Add at least one image for this project.</p>' +
+      '<input type="file" id="imageFiles" accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp,.avif" multiple hidden>' +
+      '</section>' +
+
+      '<section class="modal-section" data-video-section>' +
+      '<p class="modal-section-title">Video</p>' +
       '<div class="video-field">' +
       '<input type="file" id="projectVideoFile" accept="video/*" hidden>' +
       '<div class="video-actions"><button class="btn btn-secondary btn-sm" type="button" id="projectVideoChoose">' + icon('upload') + '<span id="projectVideoChooseLabel">Choose video</span></button>' +
@@ -1791,15 +1918,8 @@
       '<div class="video-progress" id="videoProgress" hidden>' +
       '<div class="video-progress-bar"></div>' +
       '</div>' +
-      '<p class="field-help">Only needed for video projects. Upload the file here and it is hosted for the lightbox. The video\'s own frame becomes the project cover. Max 500 MB.</p></div>' +
-      '<div class="field span-2"><label for="projectDescription">Short description</label><textarea class="input" id="projectDescription" rows="3" placeholder="Optional note about the work">' + esc(project.description) + '</textarea></div>' +
-      '</div></section>' +
-
-      '<section class="modal-section"><div class="section-head"><div><p class="modal-section-title">Gallery images</p><p class="field-help">Shown in the lightbox when a visitor opens the project.</p></div>' +
-      '<div class="page-actions"><button class="btn btn-ghost btn-sm" type="button" data-add-gallery-url>' + icon('plus') + 'Add URL</button>' +
-      '<button class="btn btn-secondary btn-sm" type="button" data-add-gallery-files>' + icon('upload') + 'Upload</button></div></div>' +
-      '<div class="gallery-list" id="galleryList"></div>' +
-      '<input type="file" id="galleryFiles" accept="image/*" multiple hidden></section>' +
+      '<p class="field-help">Upload an MP4, WebM or MOV file. The video is hosted for the lightbox and its own frame becomes the cover. Max 500 MB.</p></div>' +
+      '</section>' +
 
       '</div><div class="dialog-foot">' +
       (isEdit ? '<button class="btn btn-outline-danger" type="button" data-delete-project>' + icon('trash') + 'Delete</button>' : '') +
@@ -1808,103 +1928,112 @@
 
     openDialog(dialog);
 
-    var coverSection = dialog.querySelector('[data-cover-section]');
     var typeSelect = dialog.querySelector('#projectType');
-    // Video projects take their cover from the video itself, so the cover
-    // upload is not shown (and never required) for them.
-    function syncCoverVisibility() {
-      if (coverSection) coverSection.hidden = typeSelect.value === 'video';
-    }
-    typeSelect.addEventListener('change', syncCoverVisibility);
-    syncCoverVisibility();
+    var imagesSection = dialog.querySelector('[data-images-section]');
+    var videoSection = dialog.querySelector('[data-video-section]');
+    var imageDrop = dialog.querySelector('#imageDrop');
+    var imageGrid = dialog.querySelector('#imageGrid');
+    var imageFiles = dialog.querySelector('#imageFiles');
+    var imagesError = dialog.querySelector('#imagesError');
+    var uploadingImages = 0;
 
-    var coverImage = dialog.querySelector('#coverImage');
-    var coverEmpty = dialog.querySelector('#coverEmpty');
-    var coverUrl = dialog.querySelector('#coverUrl');
-    var coverDrop = dialog.querySelector('#coverDrop');
-    var coverFile = dialog.querySelector('#coverFile');
-    var coverClearBtn = dialog.querySelector('[data-clear-cover]');
-    var galleryList = dialog.querySelector('#galleryList');
-
-    function setCover(src) {
-      project.cover = src || '';
-      coverImage.src = assetUrl(project.cover);
-      coverImage.hidden = !project.cover;
-      coverEmpty.hidden = Boolean(project.cover);
-      coverUrl.value = project.cover;
-      coverClearBtn.hidden = !project.cover;
+    function syncMediaSections() {
+      var isVideo = typeSelect.value === 'video';
+      imagesSection.hidden = isVideo;
+      videoSection.hidden = !isVideo;
     }
 
-    function renderGallery() {
-      if (!project.gallery.length) {
-        galleryList.innerHTML = '<p class="modal-hint">No gallery images yet. The cover is used on its own.</p>';
-        return;
-      }
-      galleryList.innerHTML = project.gallery.map(function (src, index) {
-        return '<div class="gallery-row" data-gallery-row="' + index + '">' +
-          '<span class="gallery-index">' + (index + 1) + '</span>' +
-          '<input class="input" type="text" value="' + esc(src) + '" aria-label="Gallery image ' + (index + 1) + '" spellcheck="false" data-gallery-input>' +
-          '<button class="icon-btn remove-row" type="button" data-gallery-remove aria-label="Remove image">' + icon('trash') + '</button></div>';
+    function renderImages() {
+      imageGrid.innerHTML = images.map(function (src, index) {
+        return '<figure class="media-thumb' + (index === 0 ? ' is-cover' : '') + '" data-image-index="' + index + '">' +
+          '<img src="' + esc(imageThumbUrl(src)) + '" alt="" loading="lazy">' +
+          (index === 0 ? '<figcaption class="media-thumb-badge">Cover</figcaption>' : '') +
+          '<div class="media-thumb-actions">' +
+          (index === 0 ? '' : '<button class="thumb-btn" type="button" data-image-cover="' + index + '" title="Use as cover" aria-label="Use image ' + (index + 1) + ' as the cover">' + icon('image') + '</button>') +
+          '<button class="thumb-btn danger" type="button" data-image-remove="' + index + '" title="Remove image" aria-label="Remove image ' + (index + 1) + '">' + icon('x') + '</button>' +
+          '</div></figure>';
       }).join('');
+      imageGrid.hidden = images.length === 0;
+      if (images.length) {
+        imagesError.hidden = true;
+        imageDrop.classList.remove('has-error');
+      }
+      hydrateIcons(imageGrid);
     }
 
-    function addGalleryFiles(files) {
-      var list = Array.prototype.slice.call(files || []);
+    function setImageBusy(busy) {
+      imageDrop.classList.toggle('is-uploading', busy);
+      var label = imageDrop.querySelector('strong');
+      if (label) label.textContent = busy ? 'Uploading…' : 'Drop images here';
+    }
+
+    function addImages(fileList) {
+      var list = Array.prototype.slice.call(fileList || []);
       if (!list.length) return;
-      galleryList.classList.add('is-uploading');
-      list.reduce(function (chain, file) {
+      var accepted = list.filter(function (file) {
+        if (isSupportedImage(file)) return true;
+        toast(imageErrorMessage(file), 'error');
+        return false;
+      });
+      if (!accepted.length) return;
+      uploadingImages += 1;
+      setImageBusy(true);
+      accepted.reduce(function (chain, file) {
         return chain.then(function () {
           return uploadImage(file).then(function (item) {
-            project.gallery.push('/' + item.key);
-            renderGallery();
+            images.push('/' + item.key);
+            renderImages();
           }).catch(handleUploadError);
         });
       }, Promise.resolve()).then(function () {
-        galleryList.classList.remove('is-uploading');
-        renderGallery();
+        uploadingImages = Math.max(0, uploadingImages - 1);
+        if (!uploadingImages) setImageBusy(false);
+        renderImages();
       });
     }
 
-    function uploadCover(file) {
-      if (!file) return;
-      coverDrop.classList.add('is-uploading');
-      uploadImage(file).then(function (item) {
-        setCover('/' + item.key);
-      }).catch(handleUploadError).then(function () {
-        coverDrop.classList.remove('is-uploading');
-      });
-    }
+    renderImages();
+    syncMediaSections();
+    typeSelect.addEventListener('change', syncMediaSections);
 
-    renderGallery();
-
-    coverDrop.addEventListener('click', function () { coverFile.click(); });
-    coverDrop.addEventListener('keydown', function (event) {
-      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); coverFile.click(); }
+    imageDrop.addEventListener('click', function () { imageFiles.click(); });
+    imageDrop.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); imageFiles.click(); }
     });
-    coverDrop.addEventListener('dragover', function (event) {
+    imageDrop.addEventListener('dragover', function (event) {
       event.preventDefault();
-      coverDrop.classList.add('is-dragging');
+      imageDrop.classList.add('is-dragging');
     });
-    coverDrop.addEventListener('dragleave', function () { coverDrop.classList.remove('is-dragging'); });
-    coverDrop.addEventListener('drop', function (event) {
+    imageDrop.addEventListener('dragleave', function () { imageDrop.classList.remove('is-dragging'); });
+    imageDrop.addEventListener('drop', function (event) {
       event.preventDefault();
-      coverDrop.classList.remove('is-dragging');
-      if (event.dataTransfer.files && event.dataTransfer.files[0]) {
-        uploadCover(event.dataTransfer.files[0]);
-      }
+      imageDrop.classList.remove('is-dragging');
+      addImages(event.dataTransfer.files);
     });
 
-    coverFile.addEventListener('change', function () {
-      if (this.files && this.files[0]) uploadCover(this.files[0]);
+    imageFiles.addEventListener('change', function () {
+      addImages(this.files);
       this.value = '';
     });
 
-    coverUrl.addEventListener('input', function () {
-      setCover(this.value.trim());
-    });
+    dialog.querySelector('[data-choose-images]').addEventListener('click', function () { imageFiles.click(); });
 
-    dialog.querySelector('[data-choose-cover]').addEventListener('click', function () { coverFile.click(); });
-    dialog.querySelector('[data-clear-cover]').addEventListener('click', function () { setCover(''); });
+    imageGrid.addEventListener('click', function (event) {
+      var coverButton = event.target.closest('[data-image-cover]');
+      if (coverButton) {
+        var coverIndex = Number(coverButton.getAttribute('data-image-cover'));
+        var moved = images.splice(coverIndex, 1)[0];
+        images.unshift(moved);
+        renderImages();
+        return;
+      }
+      var removeButton = event.target.closest('[data-image-remove]');
+      if (removeButton) {
+        var removeIndex = Number(removeButton.getAttribute('data-image-remove'));
+        images.splice(removeIndex, 1);
+        renderImages();
+      }
+    });
 
     var videoFileInput = dialog.querySelector('#projectVideoFile');
     var videoChooseBtn = dialog.querySelector('#projectVideoChoose');
@@ -1974,47 +2103,16 @@
       videoFileInput.value = '';
       project.videoUrl = '';
       // A project without a video cannot stay a video project, otherwise the
-      // save would just refuse. Fall back to a normal image project.
+      // save would just refuse. Fall back to an image project.
       if (typeSelect.value === 'video') {
         typeSelect.value = 'image';
-        typeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+        syncMediaSections();
       }
       renderVideo();
     }
 
     videoClearBtn.addEventListener('click', clearVideoSelection);
     renderVideo();
-
-    dialog.querySelector('[data-add-gallery-url]').addEventListener('click', function () {
-      project.gallery.push('');
-      renderGallery();
-      var inputs = galleryList.querySelectorAll('[data-gallery-input]');
-      if (inputs.length) inputs[inputs.length - 1].focus();
-    });
-
-    dialog.querySelector('[data-add-gallery-files]').addEventListener('click', function () {
-      dialog.querySelector('#galleryFiles').click();
-    });
-
-    dialog.querySelector('#galleryFiles').addEventListener('change', function () {
-      addGalleryFiles(this.files);
-      this.value = '';
-    });
-
-    galleryList.addEventListener('input', function (event) {
-      if (event.target.matches('[data-gallery-input]')) {
-        var index = Number(event.target.closest('[data-gallery-row]').getAttribute('data-gallery-row'));
-        project.gallery[index] = event.target.value;
-      }
-    });
-
-    galleryList.addEventListener('click', function (event) {
-      var remove = event.target.closest('[data-gallery-remove]');
-      if (!remove) return;
-      var index = Number(remove.closest('[data-gallery-row]').getAttribute('data-gallery-row'));
-      project.gallery.splice(index, 1);
-      renderGallery();
-    });
 
     Array.prototype.forEach.call(dialog.querySelectorAll('[data-close]'), function (button) {
       button.addEventListener('click', function () {
@@ -2043,15 +2141,35 @@
       }
       titleError.hidden = true;
 
+      var type = typeSelect.value;
       project.title = title;
       project.client = dialog.querySelector('#projectClient').value.trim();
       project.category = dialog.querySelector('#projectCategory').value;
-      project.type = dialog.querySelector('#projectType').value;
+      project.type = type;
       project.status = dialog.querySelector('#projectStatus').value;
-      project.videoUrl = project.videoUrl || '';
       project.description = dialog.querySelector('#projectDescription').value.trim();
-      project.cover = coverUrl.value.trim();
-      project.gallery = project.gallery.map(function (src) { return String(src).trim(); }).filter(Boolean);
+
+      if (type === 'video') {
+        if (!project.videoUrl && !videoUploadState.file) {
+          toast('Upload a video file so the lightbox has something to open.', 'error');
+          videoChooseBtn.focus();
+          return;
+        }
+        project.gallery = [];
+        project.cover = project.cover || '';
+      } else {
+        var cleanImages = images.map(function (src) { return String(src).trim(); }).filter(Boolean);
+        if (!cleanImages.length) {
+          imagesError.hidden = false;
+          imageDrop.classList.add('has-error');
+          imageDrop.scrollIntoView({ block: 'nearest' });
+          imageDrop.focus();
+          return;
+        }
+        project.videoUrl = '';
+        project.cover = cleanImages[0];
+        project.gallery = cleanImages;
+      }
       project.updatedAt = new Date().toISOString();
 
       // Hide the form (not remove it) while publishing, so nothing the user typed is lost
@@ -2084,12 +2202,10 @@
             if (percent >= 100) setPublishText('Processing…');
           });
           project.videoUrl = item.url;
+          // The new video supplies its own frame, so an old cover would hide it.
+          project.cover = '';
           videoUploadState.status = 'done';
           videoUploadState.item = item;
-        } else if (project.type === 'video' && !project.videoUrl) {
-          toast('Upload a video file so the lightbox has something to open.', 'error');
-          dialog.querySelector('#projectVideoChoose').focus();
-          return;
         }
 
         // Duplicate detection: same video URL already used by another project

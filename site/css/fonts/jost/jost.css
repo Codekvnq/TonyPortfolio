@@ -7,7 +7,7 @@
          url('jost-700-bold.woff') format('woff');
     font-weight: bold;
     font-style: normal;
-
+    font-display: swap;
 }
 
 
@@ -19,7 +19,7 @@
          url('jost-700-bolditalic.woff') format('woff');
     font-weight: bold;
     font-style: italic;
-
+    font-display: swap;
 }
 
 
@@ -31,7 +31,7 @@
          url('jost-600-semi.woff') format('woff');
     font-weight: 600;
     font-style: normal;
-
+    font-display: swap;
 }
 
 
@@ -43,7 +43,7 @@
          url('jost-600-semiitalic.woff') format('woff');
     font-weight: 600;
     font-style: italic;
-
+    font-display: swap;
 }
 
 
@@ -54,7 +54,7 @@
          url('jost-500-medium.woff') format('woff');
     font-weight: 500;
     font-style: normal;
-
+    font-display: swap;
 }
 
 
@@ -66,7 +66,7 @@
          url('jost-500-mediumitalic.woff') format('woff');
     font-weight: 500;
     font-style: italic;
-
+    font-display: swap;
 }
 
 
@@ -78,7 +78,7 @@
          url('jost-400-book.woff') format('woff');
     font-weight: normal;
     font-style: normal;
-
+    font-display: swap;
 }
 
 
@@ -90,7 +90,7 @@
          url('jost-400-bookitalic.woff') format('woff');
     font-weight: normal;
     font-style: italic;
-
+    font-display: swap;
 }
 
 
@@ -102,7 +102,7 @@
          url('jost-300-light.woff') format('woff');
     font-weight: 300;
     font-style: normal;
-
+    font-display: swap;
 }
 
 
@@ -114,5 +114,5 @@
          url('jost-300-lightitalic.woff') format('woff');
     font-weight: 300;
     font-style: italic;
-
+    font-display: swap;
 }
